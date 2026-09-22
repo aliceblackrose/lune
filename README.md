@@ -36,3 +36,14 @@ The bootstrap VM executes the complete v0 language core, including functions, cl
 ```
 
 `eval` prints the script's final value and is intended as a bootstrap/debugging command. Runtime globals currently include `print`, `type`, `len`, scalar conversions, `args`, `env`, `exit`, higher-order list helpers (`each`, `map`, `filter`, `reduce`), string helpers (`split`, `join`, `find`, `contains`, `format`), JSON parse/serialization, file/path helpers, direct child-process execution via `exec`, and cached modules through `import`. Script arguments may follow the file path, for example `lune-bootstrap run script.lune one two`.
+
+## Self-hosting
+
+The production compiler is being ported to Lune under `compiler/`. The self-hosted lexer is already executable and tested through the bootstrap VM:
+
+```sh
+make test
+./bootstrap/build/lune-bootstrap run compiler/test_lexer.lune
+```
+
+The C frontend remains the bootstrap path until the parser and bytecode compiler ports are complete.
