@@ -1,6 +1,7 @@
 #include "vm.h"
 
 #include "object.h"
+#include "platform.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -1711,6 +1712,653 @@ static bool native_exit(
     return true;
 }
 
+static LuneObjString *path_string(
+    LuneVM *vm,
+    LuneValue value,
+    const char *function_name
+) {
+    LuneObjString *string =
+        as_string(value);
+
+    if (string == NULL) {
+        char message[96];
+
+        (void)snprintf(
+            message,
+            sizeof(message),
+            "%s expects string paths",
+            function_name
+        );
+
+        (void)native_error(
+            vm, message
+        );
+        return NULL;
+    }
+
+    if (
+        strlen(string->chars) !=
+        string->length
+    ) {
+        (void)native_error(
+            vm,
+            "path contains NUL"
+        );
+        return NULL;
+    }
+
+    return string;
+}
+
+static bool native_read_file(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *path =
+        path_string(
+            vm,
+            args[0],
+            "read_file()"
+        );
+
+    if (path == NULL) {
+        return false;
+    }
+
+    char *data = NULL;
+    size_t length = 0;
+    char error[256];
+
+    if (!lune_platform_read_file(
+        path->chars,
+        &data,
+        &length,
+        error,
+        sizeof(error)
+    )) {
+        return native_error(
+            vm, error
+        );
+    }
+
+    bool ok = make_string_value(
+        vm,
+        data,
+        length,
+        result
+    );
+
+    free(data);
+    return ok;
+}
+
+static bool native_write_file(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *path =
+        path_string(
+            vm,
+            args[0],
+            "write_file()"
+        );
+
+    if (path == NULL) {
+        return false;
+    }
+
+    LuneObjString *data =
+        as_string(args[1]);
+
+    if (data == NULL) {
+        return native_error(
+            vm,
+            "write_file() expects string data"
+        );
+    }
+
+    char error[256];
+
+    if (!lune_platform_write_file(
+        path->chars,
+        data->chars,
+        data->length,
+        error,
+        sizeof(error)
+    )) {
+        return native_error(
+            vm, error
+        );
+    }
+
+    if (
+        data->length >
+        (size_t)INT64_MAX
+    ) {
+        return native_error(
+            vm,
+            "written byte count is too large"
+        );
+    }
+
+    *result = lune_value_int(
+        (int64_t)data->length
+    );
+    return true;
+}
+
+static bool native_path_join(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *left =
+        path_string(
+            vm,
+            args[0],
+            "path_join()"
+        );
+
+    if (left == NULL) {
+        return false;
+    }
+
+    LuneObjString *right =
+        path_string(
+            vm,
+            args[1],
+            "path_join()"
+        );
+
+    if (right == NULL) {
+        return false;
+    }
+
+    if (
+        right->length > 0 &&
+        right->chars[0] == '/'
+    ) {
+        return make_string_value(
+            vm,
+            right->chars,
+            right->length,
+            result
+        );
+    }
+
+    if (left->length == 0) {
+        return make_string_value(
+            vm,
+            right->chars,
+            right->length,
+            result
+        );
+    }
+
+    if (right->length == 0) {
+        return make_string_value(
+            vm,
+            left->chars,
+            left->length,
+            result
+        );
+    }
+
+    bool left_slash =
+        left->chars[
+            left->length - 1
+        ] == '/';
+
+    bool right_slash =
+        right->chars[0] == '/';
+
+    size_t separator =
+        left_slash ||
+        right_slash
+        ? 0
+        : 1;
+
+    size_t right_offset =
+        left_slash &&
+        right_slash
+        ? 1
+        : 0;
+
+    if (
+        left->length >
+        SIZE_MAX -
+            separator -
+            (right->length -
+                right_offset)
+    ) {
+        return native_error(
+            vm,
+            "joined path is too large"
+        );
+    }
+
+    size_t length =
+        left->length +
+        separator +
+        right->length -
+        right_offset;
+
+    char *joined =
+        malloc(length);
+
+    if (
+        joined == NULL &&
+        length != 0
+    ) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    size_t offset = 0;
+
+    memcpy(
+        joined + offset,
+        left->chars,
+        left->length
+    );
+    offset += left->length;
+
+    if (separator != 0) {
+        joined[offset++] = '/';
+    }
+
+    memcpy(
+        joined + offset,
+        right->chars +
+            right_offset,
+        right->length -
+            right_offset
+    );
+
+    bool ok = make_string_value(
+        vm,
+        joined,
+        length,
+        result
+    );
+
+    free(joined);
+    return ok;
+}
+
+static size_t path_trim_end(
+    const LuneObjString *path
+) {
+    size_t end = path->length;
+
+    while (
+        end > 1 &&
+        path->chars[end - 1] == '/'
+    ) {
+        end--;
+    }
+
+    return end;
+}
+
+static bool native_path_base(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *path =
+        path_string(
+            vm,
+            args[0],
+            "path_base()"
+        );
+
+    if (path == NULL) {
+        return false;
+    }
+
+    size_t end =
+        path_trim_end(path);
+
+    size_t start = end;
+
+    while (
+        start > 0 &&
+        path->chars[start - 1] != '/'
+    ) {
+        start--;
+    }
+
+    return make_string_value(
+        vm,
+        path->chars + start,
+        end - start,
+        result
+    );
+}
+
+static bool native_path_dir(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *path =
+        path_string(
+            vm,
+            args[0],
+            "path_dir()"
+        );
+
+    if (path == NULL) {
+        return false;
+    }
+
+    size_t end =
+        path_trim_end(path);
+
+    size_t slash = end;
+
+    while (
+        slash > 0 &&
+        path->chars[slash - 1] != '/'
+    ) {
+        slash--;
+    }
+
+    if (slash == 0) {
+        return make_string_value(
+            vm, ".", 1, result
+        );
+    }
+
+    while (
+        slash > 1 &&
+        path->chars[slash - 1] == '/'
+    ) {
+        slash--;
+    }
+
+    return make_string_value(
+        vm,
+        path->chars,
+        slash,
+        result
+    );
+}
+
+static bool map_set_native(
+    LuneVM *vm,
+    LuneObjMap *map,
+    const char *name,
+    LuneValue value
+) {
+    if (!push(
+        vm,
+        value,
+        vm->native_span
+    )) {
+        return false;
+    }
+
+    bool ok =
+        lune_map_set_chars(
+            &vm->heap,
+            map,
+            name,
+            strlen(name),
+            value
+        );
+
+    LuneValue ignored;
+
+    if (!pop(
+        vm,
+        &ignored,
+        vm->native_span
+    )) {
+        return false;
+    }
+
+    if (!ok) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    return true;
+}
+
+static bool native_exec(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *program =
+        path_string(
+            vm,
+            args[0],
+            "exec()"
+        );
+
+    if (program == NULL) {
+        return false;
+    }
+
+    LuneObjList *arguments =
+        as_list(args[1]);
+
+    if (arguments == NULL) {
+        return native_error(
+            vm,
+            "exec() expects a list of string arguments"
+        );
+    }
+
+    if (
+        arguments->count >
+        SIZE_MAX /
+            sizeof(char *) -
+            2
+    ) {
+        return native_error(
+            vm,
+            "exec() argument list is too large"
+        );
+    }
+
+    char **argv = calloc(
+        arguments->count + 2,
+        sizeof(*argv)
+    );
+
+    if (argv == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    argv[0] = program->chars;
+
+    for (
+        size_t i = 0;
+        i < arguments->count;
+        i++
+    ) {
+        LuneObjString *argument =
+            as_string(
+                arguments->items[i]
+            );
+
+        if (
+            argument == NULL ||
+            strlen(argument->chars) !=
+                argument->length
+        ) {
+            free(argv);
+
+            return native_error(
+                vm,
+                "exec() arguments must be strings without NUL"
+            );
+        }
+
+        argv[i + 1] =
+            argument->chars;
+    }
+
+    LuneProcessResult process;
+    char error[256];
+
+    bool ran = lune_platform_exec(
+        program->chars,
+        argv,
+        &process,
+        error,
+        sizeof(error)
+    );
+
+    free(argv);
+
+    if (!ran) {
+        return native_error(
+            vm, error
+        );
+    }
+
+    LuneObjMap *map =
+        lune_map_new(&vm->heap);
+
+    if (map == NULL) {
+        lune_platform_process_result_free(
+            &process
+        );
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    LuneValue map_value =
+        lune_value_obj(
+            (LuneObj *)map
+        );
+
+    if (!push(
+        vm,
+        map_value,
+        vm->native_span
+    )) {
+        lune_platform_process_result_free(
+            &process
+        );
+        return false;
+    }
+
+    bool ok = map_set_native(
+        vm,
+        map,
+        "status",
+        lune_value_int(
+            (int64_t)process.status
+        )
+    );
+
+    LuneValue stdout_value =
+        lune_value_null();
+
+    if (
+        ok &&
+        !make_string_value(
+            vm,
+            process.stdout_data,
+            process.stdout_length,
+            &stdout_value
+        )
+    ) {
+        ok = false;
+    }
+
+    if (
+        ok &&
+        !map_set_native(
+            vm,
+            map,
+            "stdout",
+            stdout_value
+        )
+    ) {
+        ok = false;
+    }
+
+    LuneValue stderr_value =
+        lune_value_null();
+
+    if (
+        ok &&
+        !make_string_value(
+            vm,
+            process.stderr_data,
+            process.stderr_length,
+            &stderr_value
+        )
+    ) {
+        ok = false;
+    }
+
+    if (
+        ok &&
+        !map_set_native(
+            vm,
+            map,
+            "stderr",
+            stderr_value
+        )
+    ) {
+        ok = false;
+    }
+
+    lune_platform_process_result_free(
+        &process
+    );
+
+    LuneValue rooted_map;
+
+    if (!pop(
+        vm,
+        &rooted_map,
+        vm->native_span
+    )) {
+        return false;
+    }
+
+    if (!ok) {
+        return false;
+    }
+
+    *result = rooted_map;
+    return true;
+}
+
 static bool define_global_value(
     LuneVM *vm,
     const char *name,
@@ -2185,6 +2833,30 @@ static bool prepare_run(
         ) ||
         !define_native(
             vm, "exit", 1, native_exit
+        ) ||
+        !define_native(
+            vm, "read_file", 1,
+            native_read_file
+        ) ||
+        !define_native(
+            vm, "write_file", 2,
+            native_write_file
+        ) ||
+        !define_native(
+            vm, "path_join", 2,
+            native_path_join
+        ) ||
+        !define_native(
+            vm, "path_base", 1,
+            native_path_base
+        ) ||
+        !define_native(
+            vm, "path_dir", 1,
+            native_path_dir
+        ) ||
+        !define_native(
+            vm, "exec", 2,
+            native_exec
         )
     ) {
         return false;

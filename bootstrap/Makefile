@@ -3,7 +3,7 @@ CFLAGS ?= -std=c17 -O2 -Wall -Wextra -Wpedantic -Werror
 
 BUILD := build
 FRONTEND := lexer.c ast.c parser.c
-RUNTIME := value.c object.c bytecode.c compiler.c vm.c
+RUNTIME := value.c object.c bytecode.c compiler.c platform.c vm.c
 COMMON := $(FRONTEND) $(RUNTIME)
 
 .PHONY: all test test-syntax test-examples bench bench-build clean
@@ -13,7 +13,7 @@ all: $(BUILD)/lune-bootstrap
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/lune-bootstrap: main.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h compiler.h vm.h | $(BUILD)
+$(BUILD)/lune-bootstrap: main.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h compiler.h platform.h vm.h | $(BUILD)
 	$(CC) $(CFLAGS) main.c $(COMMON) -o $@
 
 $(BUILD)/test-lexer: test_lexer.c lexer.c lexer.h | $(BUILD)
@@ -22,10 +22,10 @@ $(BUILD)/test-lexer: test_lexer.c lexer.c lexer.h | $(BUILD)
 $(BUILD)/test-parser: test_parser.c $(FRONTEND) lexer.h ast.h parser.h | $(BUILD)
 	$(CC) $(CFLAGS) test_parser.c $(FRONTEND) -o $@
 
-$(BUILD)/test-vm: test_vm.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h compiler.h vm.h | $(BUILD)
+$(BUILD)/test-vm: test_vm.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h compiler.h platform.h vm.h | $(BUILD)
 	$(CC) $(CFLAGS) test_vm.c $(COMMON) -o $@
 
-$(BUILD)/bench: ../bench/bench.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h compiler.h vm.h | $(BUILD)
+$(BUILD)/bench: ../bench/bench.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h compiler.h platform.h vm.h | $(BUILD)
 	$(CC) $(CFLAGS) -I. ../bench/bench.c $(COMMON) -o $@
 
 bench-build: $(BUILD)/bench

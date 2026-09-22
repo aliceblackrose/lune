@@ -750,6 +750,62 @@ int main(void) {
         "exit(300)\n"
     );
 
+    expect_string(
+        "path-join",
+        "path_join(\"alpha\", \"beta\")\n",
+        "alpha/beta",
+        10
+    );
+
+    expect_string(
+        "path-base",
+        "path_base(\"/tmp/file.txt\")\n",
+        "file.txt",
+        8
+    );
+
+    expect_string(
+        "path-dir",
+        "path_dir(\"/tmp/file.txt\")\n",
+        "/tmp",
+        4
+    );
+
+    expect_int(
+        "write-file",
+        "write_file("
+        "\"build/lune-runtime-io.txt\", "
+        "\"hello file\")\n",
+        10
+    );
+
+    expect_string(
+        "read-file",
+        "read_file("
+        "\"build/lune-runtime-io.txt\""
+        ")\n",
+        "hello file",
+        10
+    );
+
+    expect_bool(
+        "exec-capture",
+        "r := exec("
+        "\"sh\", "
+        "[\"-c\", "
+        "\"printf out; printf err >&2; exit 7\"]"
+        ")\n"
+        "r.status == 7 and "
+        "r.stdout == \"out\" and "
+        "r.stderr == \"err\"\n",
+        true
+    );
+
+    expect_error(
+        "exec-args-type",
+        "exec(\"sh\", [1])\n"
+    );
+
     expect_error(
         "wrong-arity",
         "f := fn(x) => x\n"
