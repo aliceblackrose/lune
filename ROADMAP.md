@@ -255,36 +255,36 @@ The exact instruction set is allowed to change while the VM is young.
 
 ### Memory management
 
-- [ ] Automatic garbage collection.
-- [ ] Start with tracing mark-and-sweep.
-- [ ] Correctly trace closures, lists, maps, strings, and VM roots.
-- [ ] Stress-GC test mode.
-- [ ] Memory-safety regression tests.
+- [x] Automatic garbage collection.
+- [x] Start with tracing mark-and-sweep.
+- [x] Correctly trace closures, lists, maps, strings, and VM roots.
+- [x] Stress-GC test mode.
+- [x] Memory-safety regression tests.
 
 ### Representation
 
-- [ ] Keep common scalar values allocation-free.
-- [ ] Avoid allocating ordinary integer arithmetic results where practical.
-- [ ] Intern strings only if profiling justifies it.
-- [ ] Keep object layouts simple before attempting advanced representation tricks.
+- [x] Keep common scalar values allocation-free.
+- [x] Avoid allocating ordinary integer arithmetic results where practical.
+- [x] Defer string interning until profiling demonstrates a need.
+- [x] Keep object layouts simple before attempting advanced representation tricks.
 
 ### Benchmark baseline
 
 Track at least:
 
-- [ ] process startup time
-- [ ] lexer/parser throughput
-- [ ] bytecode compilation time
-- [ ] function-call overhead
-- [ ] tight integer loop
-- [ ] list iteration
-- [ ] map lookup
-- [ ] string-heavy workload
-- [ ] GC-heavy workload
+- [x] process startup time
+- [x] lexer/parser throughput
+- [x] bytecode compilation time
+- [x] function-call overhead
+- [x] tight integer loop
+- [x] list indexing / iteration-style access
+- [x] map lookup
+- [x] string-heavy workload
+- [x] GC-heavy workload
 
 Do not add JIT compilation at this stage.
 
-**Done when:** the VM has predictable memory behavior and a reproducible benchmark suite.
+**Status:** complete. The runtime uses tracing mark-and-sweep GC, VM tests run under collect-on-every-allocation stress mode, CI runs ASan/UBSan with leak detection, and `make bench` provides a reproducible performance baseline.\n\n**Done when:** the VM has predictable memory behavior and a reproducible benchmark suite.
 
 ---
 
