@@ -1,6 +1,7 @@
 #include "vm.h"
 
 #include "compiler.h"
+#include "bytecode_image.h"
 #include "object.h"
 #include "parser.h"
 #include "platform.h"
@@ -1420,6 +1421,25 @@ static char *module_base_directory(
     );
 }
 
+static bool bytes_end_with(
+    const char *chars,
+    size_t length,
+    const char *suffix
+) {
+    size_t suffix_length =
+        strlen(suffix);
+
+    return
+        length >= suffix_length &&
+        memcmp(
+            chars +
+                length -
+                suffix_length,
+            suffix,
+            suffix_length
+        ) == 0;
+}
+
 static bool module_file_key(
     LuneVM *vm,
     const LuneObjString *specifier,
@@ -1467,18 +1487,44 @@ static bool module_file_key(
     size_t base_length =
         strlen(base);
 
-    size_t extension =
-        (
-            specifier->length >= 5 &&
-            memcmp(
-                specifier->chars +
-                    specifier->length - 5,
-                ".lune",
-                5
-            ) == 0
-        )
-        ? 0
-        : 5;
+    bool explicit_source =
+        bytes_end_with(
+            specifier->chars,
+            specifier->length,
+            ".lune"
+        );
+
+    bool explicit_image =
+        bytes_end_with(
+            specifier->chars,
+            specifier->length,
+            ".lbc"
+        );
+
+    const char *extension_text =
+        NULL;
+    size_t extension = 0;
+
+    if (
+        !explicit_source &&
+        !explicit_image
+    ) {
+        bool image_parent =
+            current != NULL &&
+            bytes_end_with(
+                current,
+                strlen(current),
+                ".lbc"
+            );
+
+        extension_text =
+            image_parent
+            ? ".lbc"
+            : ".lune";
+
+        extension =
+            strlen(extension_text);
+    }
 
     size_t separator =
         absolute ||
@@ -1549,11 +1595,11 @@ static bool module_file_key(
     if (extension != 0) {
         memcpy(
             joined + offset,
-            ".lune",
-            5
+            extension_text,
+            extension
         );
 
-        offset += 5;
+        offset += extension;
     }
 
     joined[offset] = '\0';
@@ -5440,7 +5486,17 @@ static bool native_import(
                 specifier->chars,
                 '/',
                 specifier->length
-            ) != NULL
+            ) != NULL ||
+            bytes_end_with(
+                specifier->chars,
+                specifier->length,
+                ".lune"
+            ) ||
+            bytes_end_with(
+                specifier->chars,
+                specifier->length,
+                ".lbc"
+            )
         );
 
     if (!file_module) {
@@ -5554,17 +5610,58 @@ static bool native_import(
         );
     }
 
-    bool compiled =
-        module_compile_wrapper(
-            vm,
-            entry,
-            source,
-            source_length
+    bool compiled = false;
+
+    if (bytes_end_with(
+        entry->key,
+        strlen(entry->key),
+        ".lbc"
+    )) {
+        LuneChunk *chunk =
+            malloc(sizeof(*chunk));
+
+        if (chunk == NULL) {
+            free(source);
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+
+        lune_chunk_init(chunk);
+
+        compiled = lune_bytecode_load(
+            (const uint8_t *)source,
+            source_length,
+            chunk,
+            error,
+            sizeof(error)
         );
+
+        if (compiled) {
+            entry->chunk = chunk;
+        } else {
+            lune_chunk_free(chunk);
+            free(chunk);
+        }
+    } else {
+        compiled =
+            module_compile_wrapper(
+                vm,
+                entry,
+                source,
+                source_length
+            );
+    }
 
     free(source);
 
     if (!compiled) {
+        if (error[0] != '\0') {
+            return native_error(
+                vm, error
+            );
+        }
+
         return false;
     }
 

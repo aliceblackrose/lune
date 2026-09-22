@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "bytecode.h"
+#include "bytecode_image.h"
 #include "compiler.h"
 #include "lexer.h"
 #include "parser.h"
@@ -196,10 +197,102 @@ static int execute_file(
         : 0;
 }
 
+static int execute_bytecode_file(
+    const char *path,
+    const char *data,
+    size_t length,
+    bool print_result,
+    int process_argc,
+    const char *const *process_argv
+) {
+    LuneChunk chunk;
+    lune_chunk_init(&chunk);
+
+    char error[256];
+
+    if (!lune_bytecode_load(
+        (const uint8_t *)data,
+        length,
+        &chunk,
+        error,
+        sizeof(error)
+    )) {
+        fprintf(
+            stderr,
+            "%s: error: %s\n",
+            path,
+            error
+        );
+        return 1;
+    }
+
+    LuneVM *vm =
+        lune_vm_new(
+            print_diagnostic,
+            (void *)path
+        );
+
+    bool ok = vm != NULL;
+    LuneValue result =
+        lune_value_null();
+
+    if (!ok) {
+        fprintf(
+            stderr,
+            "%s: error: out of memory\n",
+            path
+        );
+    } else {
+        lune_vm_set_process_args(
+            vm,
+            process_argc,
+            process_argv
+        );
+
+        lune_vm_set_script_path(
+            vm, path
+        );
+
+        ok = lune_vm_run(
+            vm,
+            &chunk,
+            &result
+        );
+    }
+
+    int exit_status = 0;
+
+    bool requested_exit =
+        vm != NULL &&
+        lune_vm_exit_status(
+            vm, &exit_status
+        );
+
+    if (
+        ok &&
+        print_result &&
+        !requested_exit
+    ) {
+        lune_value_print(
+            stdout, result
+        );
+        putchar('\n');
+    }
+
+    lune_vm_free(vm);
+    lune_chunk_free(&chunk);
+
+    if (!ok) return 1;
+
+    return requested_exit
+        ? exit_status
+        : 0;
+}
+
 static void usage(const char *program) {
     fprintf(
         stderr,
-        "usage: %s <lex|check|parse|run|eval> FILE [ARGS...]\n",
+        "usage: %s <lex|check|parse|run|eval|runbc|evalbc> FILE [ARGS...]\n",
         program
     );
 }
@@ -212,7 +305,9 @@ int main(int argc, char **argv) {
 
     bool runtime_command =
         strcmp(argv[1], "run") == 0 ||
-        strcmp(argv[1], "eval") == 0;
+        strcmp(argv[1], "eval") == 0 ||
+        strcmp(argv[1], "runbc") == 0 ||
+        strcmp(argv[1], "evalbc") == 0;
 
     if (!runtime_command && argc != 3) {
         usage(argv[0]);
@@ -248,6 +343,24 @@ int main(int argc, char **argv) {
         );
     } else if (strcmp(argv[1], "eval") == 0) {
         result = execute_file(
+            argv[2],
+            source,
+            length,
+            true,
+            argc - 3,
+            (const char *const *)(argv + 3)
+        );
+    } else if (strcmp(argv[1], "runbc") == 0) {
+        result = execute_bytecode_file(
+            argv[2],
+            source,
+            length,
+            false,
+            argc - 3,
+            (const char *const *)(argv + 3)
+        );
+    } else if (strcmp(argv[1], "evalbc") == 0) {
+        result = execute_bytecode_file(
             argv[2],
             source,
             length,
