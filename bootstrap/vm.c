@@ -1393,26 +1393,6 @@ static char *copy_chars(
     return copy;
 }
 
-static bool string_ends_with_chars(
-    const char *value,
-    const char *suffix
-) {
-    size_t value_length =
-        strlen(value);
-    size_t suffix_length =
-        strlen(suffix);
-
-    return
-        value_length >= suffix_length &&
-        memcmp(
-            value +
-                value_length -
-                suffix_length,
-            suffix,
-            suffix_length
-        ) == 0;
-}
-
 static char *module_base_directory(
     const char *path
 ) {
