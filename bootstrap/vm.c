@@ -15,7 +15,9 @@ typedef struct {
     const LuneChunk *chunk;
     size_t ip;
     size_t stack_base;
+
     LuneObjClosure *closure;
+
     LuneValue locals[LOCAL_MAX];
     bool local_defined[LOCAL_MAX];
 } CallFrame;
@@ -31,6 +33,9 @@ struct LuneVM {
 
     LuneObjMap *globals;
     LuneObjUpvalue *open_upvalues;
+
+    LuneValue last_result;
+    bool has_result;
 
     LuneDiagnosticFn diagnostic;
     void *diagnostic_context;
@@ -51,9 +56,87 @@ static bool runtime_error(
     return false;
 }
 
-static CallFrame *current_frame(LuneVM *vm) {
-    if (vm->frame_count == 0) return NULL;
-    return &vm->frames[vm->frame_count - 1];
+static void mark_vm_roots(
+    void *context,
+    LuneHeap *heap
+) {
+    LuneVM *vm = context;
+
+    for (
+        size_t i = 0;
+        i < vm->stack_count;
+        i++
+    ) {
+        lune_heap_mark_value(
+            heap, vm->stack[i]
+        );
+    }
+
+    if (vm->globals != NULL) {
+        lune_heap_mark_object(
+            heap,
+            (LuneObj *)vm->globals
+        );
+    }
+
+    for (
+        size_t frame_index = 0;
+        frame_index < vm->frame_count;
+        frame_index++
+    ) {
+        CallFrame *frame =
+            &vm->frames[frame_index];
+
+        if (frame->closure != NULL) {
+            lune_heap_mark_object(
+                heap,
+                (LuneObj *)frame->closure
+            );
+        }
+
+        for (
+            size_t local = 0;
+            local < LOCAL_MAX;
+            local++
+        ) {
+            if (frame->local_defined[local]) {
+                lune_heap_mark_value(
+                    heap,
+                    frame->locals[local]
+                );
+            }
+        }
+    }
+
+    for (
+        LuneObjUpvalue *upvalue =
+            vm->open_upvalues;
+        upvalue != NULL;
+        upvalue = upvalue->next_open
+    ) {
+        lune_heap_mark_object(
+            heap,
+            (LuneObj *)upvalue
+        );
+    }
+
+    if (vm->has_result) {
+        lune_heap_mark_value(
+            heap, vm->last_result
+        );
+    }
+}
+
+static CallFrame *current_frame(
+    LuneVM *vm
+) {
+    if (vm->frame_count == 0) {
+        return NULL;
+    }
+
+    return &vm->frames[
+        vm->frame_count - 1
+    ];
 }
 
 static bool push(
@@ -61,13 +144,18 @@ static bool push(
     LuneValue value,
     LuneSpan span
 ) {
-    if (vm->stack_count >= STACK_MAX) {
+    if (
+        vm->stack_count >= STACK_MAX
+    ) {
         return runtime_error(
-            vm, span, "runtime stack overflow"
+            vm,
+            span,
+            "runtime stack overflow"
         );
     }
 
-    vm->stack[vm->stack_count++] = value;
+    vm->stack[vm->stack_count++] =
+        value;
     return true;
 }
 
@@ -84,7 +172,8 @@ static bool pop(
         );
     }
 
-    *value = vm->stack[--vm->stack_count];
+    *value =
+        vm->stack[--vm->stack_count];
     return true;
 }
 
@@ -101,7 +190,10 @@ static bool peek_value(
         );
     }
 
-    *value = vm->stack[vm->stack_count - 1];
+    *value =
+        vm->stack[
+            vm->stack_count - 1
+        ];
     return true;
 }
 
@@ -111,16 +203,27 @@ static bool read_u16(
     uint16_t *value,
     LuneSpan span
 ) {
-    if (frame->ip + 1 >= frame->chunk->count) {
+    if (
+        frame->ip + 1 >=
+        frame->chunk->count
+    ) {
         return runtime_error(
-            vm, span, "truncated bytecode operand"
+            vm,
+            span,
+            "truncated bytecode operand"
         );
     }
 
     *value = (uint16_t)(
-        ((uint16_t)frame->chunk->code[frame->ip] << 8) |
-        frame->chunk->code[frame->ip + 1]
+        ((uint16_t)
+            frame->chunk->code[
+                frame->ip
+            ] << 8) |
+        frame->chunk->code[
+            frame->ip + 1
+        ]
     );
+
     frame->ip += 2;
     return true;
 }
@@ -132,80 +235,125 @@ static bool read_name(
     LuneSpan span,
     const LuneName **name
 ) {
-    if (index >= frame->chunk->names_count) {
+    if (
+        index >=
+        frame->chunk->names_count
+    ) {
         return runtime_error(
-            vm, span, "invalid string/name constant"
+            vm,
+            span,
+            "invalid string/name constant"
         );
     }
 
-    *name = &frame->chunk->names[index];
+    *name =
+        &frame->chunk->names[index];
     return true;
 }
 
-static bool numeric(LuneValue value) {
-    return value.kind == LUNE_VALUE_INT ||
-        value.kind == LUNE_VALUE_FLOAT;
+static bool numeric(
+    LuneValue value
+) {
+    return value.kind ==
+        LUNE_VALUE_INT ||
+        value.kind ==
+        LUNE_VALUE_FLOAT;
 }
 
-static long double as_number(LuneValue value) {
-    return value.kind == LUNE_VALUE_INT
-        ? (long double)value.as.integer
-        : (long double)value.as.floating;
+static long double as_number(
+    LuneValue value
+) {
+    return value.kind ==
+        LUNE_VALUE_INT
+        ? (long double)
+            value.as.integer
+        : (long double)
+            value.as.floating;
 }
 
-static LuneObjString *as_string(LuneValue value) {
+static LuneObjString *as_string(
+    LuneValue value
+) {
     if (
-        value.kind != LUNE_VALUE_OBJ ||
-        !lune_obj_is_string(value.as.object)
+        value.kind !=
+            LUNE_VALUE_OBJ ||
+        !lune_obj_is_string(
+            value.as.object
+        )
     ) {
         return NULL;
     }
 
-    return (LuneObjString *)value.as.object;
+    return (LuneObjString *)
+        value.as.object;
 }
 
-static LuneObjList *as_list(LuneValue value) {
+static LuneObjList *as_list(
+    LuneValue value
+) {
     if (
-        value.kind != LUNE_VALUE_OBJ ||
-        !lune_obj_is_list(value.as.object)
+        value.kind !=
+            LUNE_VALUE_OBJ ||
+        !lune_obj_is_list(
+            value.as.object
+        )
     ) {
         return NULL;
     }
 
-    return (LuneObjList *)value.as.object;
+    return (LuneObjList *)
+        value.as.object;
 }
 
-static LuneObjMap *as_map(LuneValue value) {
+static LuneObjMap *as_map(
+    LuneValue value
+) {
     if (
-        value.kind != LUNE_VALUE_OBJ ||
-        !lune_obj_is_map(value.as.object)
+        value.kind !=
+            LUNE_VALUE_OBJ ||
+        !lune_obj_is_map(
+            value.as.object
+        )
     ) {
         return NULL;
     }
 
-    return (LuneObjMap *)value.as.object;
+    return (LuneObjMap *)
+        value.as.object;
 }
 
-static LuneObjClosure *as_closure(LuneValue value) {
+static LuneObjClosure *as_closure(
+    LuneValue value
+) {
     if (
-        value.kind != LUNE_VALUE_OBJ ||
-        !lune_obj_is_closure(value.as.object)
+        value.kind !=
+            LUNE_VALUE_OBJ ||
+        !lune_obj_is_closure(
+            value.as.object
+        )
     ) {
         return NULL;
     }
 
-    return (LuneObjClosure *)value.as.object;
+    return (LuneObjClosure *)
+        value.as.object;
 }
 
-static LuneObjNative *as_native(LuneValue value) {
+static LuneObjNative *as_native(
+    LuneValue value
+) {
     if (
-        value.kind != LUNE_VALUE_OBJ ||
-        !lune_obj_is_native(value.as.object)
+        value.kind !=
+            LUNE_VALUE_OBJ ||
+        !lune_obj_is_native(
+            value.as.object
+        )
     ) {
         return NULL;
     }
 
-    return (LuneObjNative *)value.as.object;
+    return (LuneObjNative *)
+        value.as.object;
 }
 
 static bool int_add(
@@ -214,8 +362,10 @@ static bool int_add(
     int64_t *out
 ) {
     if (
-        (b > 0 && a > INT64_MAX - b) ||
-        (b < 0 && a < INT64_MIN - b)
+        (b > 0 &&
+            a > INT64_MAX - b) ||
+        (b < 0 &&
+            a < INT64_MIN - b)
     ) {
         return false;
     }
@@ -230,8 +380,10 @@ static bool int_sub(
     int64_t *out
 ) {
     if (
-        (b < 0 && a > INT64_MAX + b) ||
-        (b > 0 && a < INT64_MIN + b)
+        (b < 0 &&
+            a > INT64_MAX + b) ||
+        (b > 0 &&
+            a < INT64_MIN + b)
     ) {
         return false;
     }
@@ -251,23 +403,29 @@ static bool int_mul(
     }
 
     if (
-        (a == -1 && b == INT64_MIN) ||
-        (b == -1 && a == INT64_MIN)
+        (a == -1 &&
+            b == INT64_MIN) ||
+        (b == -1 &&
+            a == INT64_MIN)
     ) {
         return false;
     }
 
     if (a > 0) {
         if (
-            (b > 0 && a > INT64_MAX / b) ||
-            (b < 0 && b < INT64_MIN / a)
+            (b > 0 &&
+                a > INT64_MAX / b) ||
+            (b < 0 &&
+                b < INT64_MIN / a)
         ) {
             return false;
         }
     } else {
         if (
-            (b > 0 && a < INT64_MIN / b) ||
-            (b < 0 && b < INT64_MAX / a)
+            (b > 0 &&
+                a < INT64_MIN / b) ||
+            (b < 0 &&
+                b < INT64_MAX / a)
         ) {
             return false;
         }
@@ -282,22 +440,31 @@ static bool arithmetic(
     LuneOpcode opcode,
     LuneSpan span
 ) {
-    LuneValue right;
-    LuneValue left;
-
     if (
-        !pop(vm, &right, span) ||
-        !pop(vm, &left, span)
+        opcode == LUNE_OP_ADD &&
+        vm->stack_count >= 2
     ) {
-        return false;
-    }
+        LuneValue left =
+            vm->stack[
+                vm->stack_count - 2
+            ];
 
-    if (opcode == LUNE_OP_ADD) {
-        LuneObjString *a = as_string(left);
-        LuneObjString *b = as_string(right);
+        LuneValue right =
+            vm->stack[
+                vm->stack_count - 1
+            ];
+
+        LuneObjString *a =
+            as_string(left);
+
+        LuneObjString *b =
+            as_string(right);
 
         if (a != NULL || b != NULL) {
-            if (a == NULL || b == NULL) {
+            if (
+                a == NULL ||
+                b == NULL
+            ) {
                 return runtime_error(
                     vm,
                     span,
@@ -305,16 +472,27 @@ static bool arithmetic(
                 );
             }
 
+            /*
+             * Keep both operands on the VM stack
+             * while allocating. Stress-GC may run
+             * inside lune_string_concat().
+             */
             LuneObjString *joined =
                 lune_string_concat(
-                    &vm->heap, a, b
+                    &vm->heap,
+                    a,
+                    b
                 );
 
             if (joined == NULL) {
                 return runtime_error(
-                    vm, span, "out of memory"
+                    vm,
+                    span,
+                    "out of memory"
                 );
             }
+
+            vm->stack_count -= 2;
 
             return push(
                 vm,
@@ -326,7 +504,20 @@ static bool arithmetic(
         }
     }
 
-    if (!numeric(left) || !numeric(right)) {
+    LuneValue right;
+    LuneValue left;
+
+    if (
+        !pop(vm, &right, span) ||
+        !pop(vm, &left, span)
+    ) {
+        return false;
+    }
+
+    if (
+        !numeric(left) ||
+        !numeric(right)
+    ) {
         return runtime_error(
             vm,
             span,
@@ -334,12 +525,18 @@ static bool arithmetic(
         );
     }
 
-    if (opcode == LUNE_OP_DIVIDE) {
-        long double divisor = as_number(right);
+    if (
+        opcode ==
+        LUNE_OP_DIVIDE
+    ) {
+        long double divisor =
+            as_number(right);
 
         if (divisor == 0.0L) {
             return runtime_error(
-                vm, span, "division by zero"
+                vm,
+                span,
+                "division by zero"
             );
         }
 
@@ -347,17 +544,23 @@ static bool arithmetic(
             vm,
             lune_value_float(
                 (double)(
-                    as_number(left) / divisor
+                    as_number(left) /
+                    divisor
                 )
             ),
             span
         );
     }
 
-    if (opcode == LUNE_OP_MODULO) {
+    if (
+        opcode ==
+        LUNE_OP_MODULO
+    ) {
         if (
-            left.kind != LUNE_VALUE_INT ||
-            right.kind != LUNE_VALUE_INT
+            left.kind !=
+                LUNE_VALUE_INT ||
+            right.kind !=
+                LUNE_VALUE_INT
         ) {
             return runtime_error(
                 vm,
@@ -366,18 +569,25 @@ static bool arithmetic(
             );
         }
 
-        if (right.as.integer == 0) {
+        if (
+            right.as.integer == 0
+        ) {
             return runtime_error(
-                vm, span, "modulo by zero"
+                vm,
+                span,
+                "modulo by zero"
             );
         }
 
         if (
-            left.as.integer == INT64_MIN &&
+            left.as.integer ==
+                INT64_MIN &&
             right.as.integer == -1
         ) {
             return push(
-                vm, lune_value_int(0), span
+                vm,
+                lune_value_int(0),
+                span
             );
         }
 
@@ -392,42 +602,55 @@ static bool arithmetic(
     }
 
     if (
-        left.kind == LUNE_VALUE_FLOAT ||
-        right.kind == LUNE_VALUE_FLOAT
+        left.kind ==
+            LUNE_VALUE_FLOAT ||
+        right.kind ==
+            LUNE_VALUE_FLOAT
     ) {
         double a =
-            left.kind == LUNE_VALUE_FLOAT
+            left.kind ==
+                LUNE_VALUE_FLOAT
             ? left.as.floating
-            : (double)left.as.integer;
+            : (double)
+                left.as.integer;
 
         double b =
-            right.kind == LUNE_VALUE_FLOAT
+            right.kind ==
+                LUNE_VALUE_FLOAT
             ? right.as.floating
-            : (double)right.as.integer;
+            : (double)
+                right.as.integer;
 
         double result =
-            opcode == LUNE_OP_ADD
+            opcode ==
+                LUNE_OP_ADD
             ? a + b
-            : opcode == LUNE_OP_SUBTRACT
+            : opcode ==
+                LUNE_OP_SUBTRACT
                 ? a - b
                 : a * b;
 
         return push(
             vm,
-            lune_value_float(result),
+            lune_value_float(
+                result
+            ),
             span
         );
     }
 
     int64_t result = 0;
+
     bool ok =
-        opcode == LUNE_OP_ADD
+        opcode ==
+            LUNE_OP_ADD
         ? int_add(
             left.as.integer,
             right.as.integer,
             &result
         )
-        : opcode == LUNE_OP_SUBTRACT
+        : opcode ==
+            LUNE_OP_SUBTRACT
             ? int_sub(
                 left.as.integer,
                 right.as.integer,
@@ -441,7 +664,9 @@ static bool arithmetic(
 
     if (!ok) {
         return runtime_error(
-            vm, span, "integer overflow"
+            vm,
+            span,
+            "integer overflow"
         );
     }
 
@@ -467,7 +692,10 @@ static bool compare(
         return false;
     }
 
-    if (!numeric(left) || !numeric(right)) {
+    if (
+        !numeric(left) ||
+        !numeric(right)
+    ) {
         return runtime_error(
             vm,
             span,
@@ -475,20 +703,28 @@ static bool compare(
         );
     }
 
-    long double a = as_number(left);
-    long double b = as_number(right);
+    long double a =
+        as_number(left);
+
+    long double b =
+        as_number(right);
 
     bool result =
-        opcode == LUNE_OP_LESS
+        opcode ==
+            LUNE_OP_LESS
         ? a < b
-        : opcode == LUNE_OP_LESS_EQUAL
+        : opcode ==
+            LUNE_OP_LESS_EQUAL
             ? a <= b
-            : opcode == LUNE_OP_GREATER
+            : opcode ==
+                LUNE_OP_GREATER
                 ? a > b
                 : a >= b;
 
     return push(
-        vm, lune_value_bool(result), span
+        vm,
+        lune_value_bool(result),
+        span
     );
 }
 
@@ -506,9 +742,14 @@ static bool get_index(
         return false;
     }
 
-    LuneObjList *list = as_list(object);
+    LuneObjList *list =
+        as_list(object);
+
     if (list != NULL) {
-        if (index.kind != LUNE_VALUE_INT) {
+        if (
+            index.kind !=
+                LUNE_VALUE_INT
+        ) {
             return runtime_error(
                 vm,
                 span,
@@ -518,7 +759,8 @@ static bool get_index(
 
         if (
             index.as.integer < 0 ||
-            (uint64_t)index.as.integer >=
+            (uint64_t)
+                index.as.integer >=
                 list->count
         ) {
             return runtime_error(
@@ -531,15 +773,19 @@ static bool get_index(
         return push(
             vm,
             list->items[
-                (size_t)index.as.integer
+                (size_t)
+                    index.as.integer
             ],
             span
         );
     }
 
-    LuneObjMap *map = as_map(object);
+    LuneObjMap *map =
+        as_map(object);
+
     if (map != NULL) {
-        LuneObjString *key = as_string(index);
+        LuneObjString *key =
+            as_string(index);
 
         if (key == NULL) {
             return runtime_error(
@@ -550,13 +796,17 @@ static bool get_index(
         }
 
         LuneValue value;
+
         if (!lune_map_get(
             map, key, &value
         )) {
-            value = lune_value_null();
+            value =
+                lune_value_null();
         }
 
-        return push(vm, value, span);
+        return push(
+            vm, value, span
+        );
     }
 
     return runtime_error(
@@ -582,9 +832,14 @@ static bool set_index(
         return false;
     }
 
-    LuneObjList *list = as_list(object);
+    LuneObjList *list =
+        as_list(object);
+
     if (list != NULL) {
-        if (index.kind != LUNE_VALUE_INT) {
+        if (
+            index.kind !=
+                LUNE_VALUE_INT
+        ) {
             return runtime_error(
                 vm,
                 span,
@@ -594,7 +849,8 @@ static bool set_index(
 
         if (
             index.as.integer < 0 ||
-            (uint64_t)index.as.integer >=
+            (uint64_t)
+                index.as.integer >=
                 list->count
         ) {
             return runtime_error(
@@ -605,15 +861,21 @@ static bool set_index(
         }
 
         list->items[
-            (size_t)index.as.integer
+            (size_t)
+                index.as.integer
         ] = value;
 
-        return push(vm, value, span);
+        return push(
+            vm, value, span
+        );
     }
 
-    LuneObjMap *map = as_map(object);
+    LuneObjMap *map =
+        as_map(object);
+
     if (map != NULL) {
-        LuneObjString *key = as_string(index);
+        LuneObjString *key =
+            as_string(index);
 
         if (key == NULL) {
             return runtime_error(
@@ -630,11 +892,15 @@ static bool set_index(
             value
         )) {
             return runtime_error(
-                vm, span, "out of memory"
+                vm,
+                span,
+                "out of memory"
             );
         }
 
-        return push(vm, value, span);
+        return push(
+            vm, value, span
+        );
     }
 
     return runtime_error(
@@ -653,17 +919,26 @@ static bool get_field(
     const LuneName *name;
 
     if (!read_name(
-        vm, frame, index, span, &name
+        vm,
+        frame,
+        index,
+        span,
+        &name
     )) {
         return false;
     }
 
     LuneValue object;
-    if (!pop(vm, &object, span)) {
+
+    if (!pop(
+        vm, &object, span
+    )) {
         return false;
     }
 
-    LuneObjMap *map = as_map(object);
+    LuneObjMap *map =
+        as_map(object);
+
     if (map == NULL) {
         return runtime_error(
             vm,
@@ -680,10 +955,13 @@ static bool get_field(
         name->length,
         &value
     )) {
-        value = lune_value_null();
+        value =
+            lune_value_null();
     }
 
-    return push(vm, value, span);
+    return push(
+        vm, value, span
+    );
 }
 
 static bool set_field(
@@ -695,22 +973,35 @@ static bool set_field(
     const LuneName *name;
 
     if (!read_name(
-        vm, frame, index, span, &name
+        vm,
+        frame,
+        index,
+        span,
+        &name
     )) {
         return false;
     }
 
-    LuneValue value;
-    LuneValue object;
-
-    if (
-        !pop(vm, &value, span) ||
-        !pop(vm, &object, span)
-    ) {
-        return false;
+    if (vm->stack_count < 2) {
+        return runtime_error(
+            vm,
+            span,
+            "internal stack underflow during member assignment"
+        );
     }
 
-    LuneObjMap *map = as_map(object);
+    LuneValue object =
+        vm->stack[
+            vm->stack_count - 2
+        ];
+
+    LuneValue value =
+        vm->stack[
+            vm->stack_count - 1
+        ];
+
+    LuneObjMap *map =
+        as_map(object);
 
     if (map == NULL) {
         return runtime_error(
@@ -720,6 +1011,10 @@ static bool set_field(
         );
     }
 
+    /*
+     * Keep object and value on the stack
+     * while a new string key may allocate.
+     */
     if (!lune_map_set_chars(
         &vm->heap,
         map,
@@ -728,11 +1023,17 @@ static bool set_field(
         value
     )) {
         return runtime_error(
-            vm, span, "out of memory"
+            vm,
+            span,
+            "out of memory"
         );
     }
 
-    return push(vm, value, span);
+    vm->stack_count -= 2;
+
+    return push(
+        vm, value, span
+    );
 }
 
 static LuneObjUpvalue *capture_upvalue(
@@ -743,22 +1044,33 @@ static LuneObjUpvalue *capture_upvalue(
         LuneObjUpvalue *upvalue =
             vm->open_upvalues;
         upvalue != NULL;
-        upvalue = upvalue->next_open
+        upvalue =
+            upvalue->next_open
     ) {
-        if (upvalue->location == location) {
+        if (
+            upvalue->location ==
+            location
+        ) {
             return upvalue;
         }
     }
 
     LuneObjUpvalue *upvalue =
         lune_upvalue_new(
-            &vm->heap, location
+            &vm->heap,
+            location
         );
 
-    if (upvalue == NULL) return NULL;
+    if (upvalue == NULL) {
+        return NULL;
+    }
 
-    upvalue->next_open = vm->open_upvalues;
-    vm->open_upvalues = upvalue;
+    upvalue->next_open =
+        vm->open_upvalues;
+
+    vm->open_upvalues =
+        upvalue;
+
     return upvalue;
 }
 
@@ -766,7 +1078,11 @@ static bool upvalue_belongs_to_frame(
     const LuneObjUpvalue *upvalue,
     const CallFrame *frame
 ) {
-    for (size_t i = 0; i < LOCAL_MAX; i++) {
+    for (
+        size_t i = 0;
+        i < LOCAL_MAX;
+        i++
+    ) {
         if (
             upvalue->location ==
             &frame->locals[i]
@@ -774,6 +1090,7 @@ static bool upvalue_belongs_to_frame(
             return true;
         }
     }
+
     return false;
 }
 
@@ -785,19 +1102,26 @@ static void close_frame_upvalues(
         &vm->open_upvalues;
 
     while (*cursor != NULL) {
-        LuneObjUpvalue *upvalue = *cursor;
+        LuneObjUpvalue *upvalue =
+            *cursor;
 
         if (upvalue_belongs_to_frame(
             upvalue, frame
         )) {
             upvalue->closed =
                 *upvalue->location;
+
             upvalue->location =
                 &upvalue->closed;
-            *cursor = upvalue->next_open;
-            upvalue->next_open = NULL;
+
+            *cursor =
+                upvalue->next_open;
+
+            upvalue->next_open =
+                NULL;
         } else {
-            cursor = &upvalue->next_open;
+            cursor =
+                &upvalue->next_open;
         }
     }
 }
@@ -806,10 +1130,20 @@ static LuneValue native_print(
     int argc,
     const LuneValue *args
 ) {
-    for (int i = 0; i < argc; i++) {
-        if (i != 0) fputc(' ', stdout);
-        lune_value_print(stdout, args[i]);
+    for (
+        int i = 0;
+        i < argc;
+        i++
+    ) {
+        if (i != 0) {
+            fputc(' ', stdout);
+        }
+
+        lune_value_print(
+            stdout, args[i]
+        );
     }
+
     fputc('\n', stdout);
     return lune_value_null();
 }
@@ -828,17 +1162,46 @@ static bool define_native(
             function
         );
 
-    if (native == NULL) return false;
+    if (native == NULL) {
+        return false;
+    }
 
-    return lune_map_set_chars(
-        &vm->heap,
-        vm->globals,
-        name,
-        strlen(name),
+    /*
+     * lune_map_set_chars() may allocate a
+     * string key and therefore collect. Root
+     * the new native on the VM stack first.
+     */
+    if (!push(
+        vm,
         lune_value_obj(
             (LuneObj *)native
-        )
-    );
+        ),
+        (LuneSpan){0}
+    )) {
+        return false;
+    }
+
+    bool ok =
+        lune_map_set_chars(
+            &vm->heap,
+            vm->globals,
+            name,
+            strlen(name),
+            vm->stack[
+                vm->stack_count - 1
+            ]
+        );
+
+    LuneValue ignored;
+    if (!pop(
+        vm,
+        &ignored,
+        (LuneSpan){0}
+    )) {
+        return false;
+    }
+
+    return ok;
 }
 
 static bool call_closure(
@@ -849,7 +1212,8 @@ static bool call_closure(
     LuneSpan span
 ) {
     if (
-        argc != closure->function->arity
+        argc !=
+        closure->function->arity
     ) {
         return runtime_error(
             vm,
@@ -858,7 +1222,10 @@ static bool call_closure(
         );
     }
 
-    if (vm->frame_count >= FRAME_MAX) {
+    if (
+        vm->frame_count >=
+        FRAME_MAX
+    ) {
         return runtime_error(
             vm,
             span,
@@ -867,23 +1234,38 @@ static bool call_closure(
     }
 
     CallFrame *frame =
-        &vm->frames[vm->frame_count];
+        &vm->frames[
+            vm->frame_count
+        ];
 
     *frame = (CallFrame){
-        .chunk = &closure->function->chunk,
-        .stack_base = callee_index,
-        .closure = closure,
+        .chunk =
+            &closure->function
+                ->chunk,
+        .stack_base =
+            callee_index,
+        .closure =
+            closure,
     };
 
-    for (uint16_t i = 0; i < argc; i++) {
+    for (
+        uint16_t i = 0;
+        i < argc;
+        i++
+    ) {
         frame->locals[i] =
             vm->stack[
-                callee_index + 1 + i
+                callee_index +
+                1 + i
             ];
-        frame->local_defined[i] = true;
+
+        frame->local_defined[i] =
+            true;
     }
 
-    vm->stack_count = callee_index;
+    vm->stack_count =
+        callee_index;
+
     vm->frame_count++;
     return true;
 }
@@ -897,7 +1279,9 @@ static bool call_native(
 ) {
     if (
         native->arity >= 0 &&
-        argc != (uint16_t)native->arity
+        argc !=
+            (uint16_t)
+                native->arity
     ) {
         return runtime_error(
             vm,
@@ -906,13 +1290,19 @@ static bool call_native(
         );
     }
 
-    LuneValue result = native->function(
-        (int)argc,
-        vm->stack + callee_index + 1
-    );
+    LuneValue result =
+        native->function(
+            (int)argc,
+            vm->stack +
+                callee_index + 1
+        );
 
-    vm->stack_count = callee_index;
-    return push(vm, result, span);
+    vm->stack_count =
+        callee_index;
+
+    return push(
+        vm, result, span
+    );
 }
 
 static bool call_value(
@@ -932,10 +1322,13 @@ static bool call_value(
     }
 
     size_t callee_index =
-        vm->stack_count - (size_t)argc - 1;
+        vm->stack_count -
+        (size_t)argc - 1;
 
     LuneValue callee =
-        vm->stack[callee_index];
+        vm->stack[
+            callee_index
+        ];
 
     LuneObjClosure *closure =
         as_closure(callee);
@@ -974,53 +1367,120 @@ LuneVM *lune_vm_new(
     LuneDiagnosticFn diagnostic,
     void *diagnostic_context
 ) {
-    LuneVM *vm = calloc(
-        1, sizeof(*vm)
+    LuneVM *vm =
+        calloc(1, sizeof(*vm));
+
+    if (vm == NULL) {
+        return NULL;
+    }
+
+    lune_heap_init(
+        &vm->heap,
+        mark_vm_roots,
+        vm
     );
 
-    if (vm == NULL) return NULL;
+    vm->diagnostic =
+        diagnostic;
 
-    lune_heap_init(&vm->heap);
-    vm->diagnostic = diagnostic;
     vm->diagnostic_context =
         diagnostic_context;
+
     return vm;
 }
 
-void lune_vm_free(LuneVM *vm) {
+void lune_vm_free(
+    LuneVM *vm
+) {
     if (vm == NULL) return;
 
-    lune_heap_free(&vm->heap);
+    lune_heap_free(
+        &vm->heap
+    );
+
     free(vm);
+}
+
+void lune_vm_set_gc_stress(
+    LuneVM *vm,
+    bool enabled
+) {
+    lune_heap_set_stress(
+        &vm->heap, enabled
+    );
+}
+
+void lune_vm_collect_garbage(
+    LuneVM *vm
+) {
+    lune_heap_collect(
+        &vm->heap
+    );
+}
+
+size_t lune_vm_heap_bytes(
+    const LuneVM *vm
+) {
+    return lune_heap_bytes(
+        &vm->heap
+    );
 }
 
 static bool prepare_run(
     LuneVM *vm,
     const LuneChunk *chunk
 ) {
-    lune_heap_free(&vm->heap);
-    lune_heap_init(&vm->heap);
+    bool stress =
+        vm->heap.stress_gc;
 
+    /*
+     * Clear old VM roots before freeing the
+     * previous run's heap.
+     */
     vm->stack_count = 0;
     vm->frame_count = 0;
+    vm->globals = NULL;
     vm->open_upvalues = NULL;
+    vm->has_result = false;
+    vm->last_result =
+        lune_value_null();
 
-    vm->globals = lune_map_new(
+    lune_heap_free(
         &vm->heap
     );
+
+    lune_heap_init(
+        &vm->heap,
+        mark_vm_roots,
+        vm
+    );
+
+    lune_heap_set_stress(
+        &vm->heap, stress
+    );
+
+    vm->globals =
+        lune_map_new(
+            &vm->heap
+        );
 
     if (vm->globals == NULL) {
         return false;
     }
 
     if (!define_native(
-        vm, "print", -1, native_print
+        vm,
+        "print",
+        -1,
+        native_print
     )) {
         return false;
     }
 
     CallFrame *root =
-        &vm->frames[vm->frame_count++];
+        &vm->frames[
+            vm->frame_count++
+        ];
 
     *root = (CallFrame){
         .chunk = chunk,
@@ -1037,7 +1497,9 @@ bool lune_vm_run(
     const LuneChunk *chunk,
     LuneValue *result
 ) {
-    if (!prepare_run(vm, chunk)) {
+    if (!prepare_run(
+        vm, chunk
+    )) {
         return runtime_error(
             vm,
             (LuneSpan){0},
@@ -1051,7 +1513,8 @@ bool lune_vm_run(
 
         if (
             frame == NULL ||
-            frame->ip >= frame->chunk->count
+            frame->ip >=
+                frame->chunk->count
         ) {
             return runtime_error(
                 vm,
@@ -1060,13 +1523,19 @@ bool lune_vm_run(
             );
         }
 
-        size_t instruction = frame->ip;
+        size_t instruction =
+            frame->ip;
+
         LuneSpan span =
-            frame->chunk->spans[instruction];
+            frame->chunk
+                ->spans[instruction];
 
         LuneOpcode opcode =
             (LuneOpcode)
-            frame->chunk->code[frame->ip++];
+                frame->chunk
+                    ->code[
+                        frame->ip++
+                    ];
 
         uint16_t index;
         LuneValue a;
@@ -1082,7 +1551,8 @@ bool lune_vm_run(
                         span
                     ) ||
                     index >=
-                        frame->chunk->constants_count
+                        frame->chunk
+                            ->constants_count
                 ) {
                     return runtime_error(
                         vm,
@@ -1093,7 +1563,8 @@ bool lune_vm_run(
 
                 if (!push(
                     vm,
-                    frame->chunk->constants[index],
+                    frame->chunk
+                        ->constants[index],
                     span
                 )) {
                     return false;
@@ -1158,7 +1629,9 @@ bool lune_vm_run(
                         name->length
                     );
 
-                if (string == NULL) {
+                if (
+                    string == NULL
+                ) {
                     return runtime_error(
                         vm,
                         span,
@@ -1188,10 +1661,12 @@ bool lune_vm_run(
                     return false;
                 }
 
-                size_t count = index;
+                size_t count =
+                    index;
 
                 if (
-                    vm->stack_count < count
+                    vm->stack_count <
+                    count
                 ) {
                     return runtime_error(
                         vm,
@@ -1201,7 +1676,8 @@ bool lune_vm_run(
                 }
 
                 size_t base =
-                    vm->stack_count - count;
+                    vm->stack_count -
+                    count;
 
                 LuneObjList *list =
                     lune_list_new(
@@ -1218,7 +1694,8 @@ bool lune_vm_run(
                     );
                 }
 
-                vm->stack_count = base;
+                vm->stack_count =
+                    base;
 
                 if (!push(
                     vm,
@@ -1242,10 +1719,12 @@ bool lune_vm_run(
                     return false;
                 }
 
-                size_t count = index;
+                size_t count =
+                    index;
 
                 if (
-                    count > SIZE_MAX / 2 ||
+                    count >
+                        SIZE_MAX / 2 ||
                     vm->stack_count <
                         count * 2
                 ) {
@@ -1261,7 +1740,9 @@ bool lune_vm_run(
                     count * 2;
 
                 LuneObjMap *map =
-                    lune_map_new(&vm->heap);
+                    lune_map_new(
+                        &vm->heap
+                    );
 
                 if (map == NULL) {
                     return runtime_error(
@@ -1278,18 +1759,24 @@ bool lune_vm_run(
                 ) {
                     LuneValue key_value =
                         vm->stack[
-                            base + i * 2
+                            base +
+                            i * 2
                         ];
 
                     LuneValue value =
                         vm->stack[
-                            base + i * 2 + 1
+                            base +
+                            i * 2 + 1
                         ];
 
                     LuneObjString *key =
-                        as_string(key_value);
+                        as_string(
+                            key_value
+                        );
 
-                    if (key == NULL) {
+                    if (
+                        key == NULL
+                    ) {
                         return runtime_error(
                             vm,
                             span,
@@ -1311,7 +1798,8 @@ bool lune_vm_run(
                     }
                 }
 
-                vm->stack_count = base;
+                vm->stack_count =
+                    base;
 
                 if (!push(
                     vm,
@@ -1344,8 +1832,12 @@ bool lune_vm_run(
                 }
 
                 if (
-                    index >= LOCAL_MAX ||
-                    !frame->local_defined[index]
+                    index >=
+                        LOCAL_MAX ||
+                    !frame
+                        ->local_defined[
+                            index
+                        ]
                 ) {
                     return runtime_error(
                         vm,
@@ -1356,7 +1848,9 @@ bool lune_vm_run(
 
                 if (!push(
                     vm,
-                    frame->locals[index],
+                    frame->locals[
+                        index
+                    ],
                     span
                 )) {
                     return false;
@@ -1371,16 +1865,24 @@ bool lune_vm_run(
                         &index,
                         span
                     ) ||
-                    index >= LOCAL_MAX ||
+                    index >=
+                        LOCAL_MAX ||
                     !peek_value(
-                        vm, &a, span
+                        vm,
+                        &a,
+                        span
                     )
                 ) {
                     return false;
                 }
 
-                frame->locals[index] = a;
-                frame->local_defined[index] = true;
+                frame->locals[
+                    index
+                ] = a;
+
+                frame->local_defined[
+                    index
+                ] = true;
                 break;
 
             case LUNE_OP_GET_UPVALUE:
@@ -1391,9 +1893,11 @@ bool lune_vm_run(
                         &index,
                         span
                     ) ||
-                    frame->closure == NULL ||
+                    frame->closure ==
+                        NULL ||
                     index >=
-                        frame->closure->upvalue_count
+                        frame->closure
+                            ->upvalue_count
                 ) {
                     return runtime_error(
                         vm,
@@ -1421,11 +1925,15 @@ bool lune_vm_run(
                         &index,
                         span
                     ) ||
-                    frame->closure == NULL ||
+                    frame->closure ==
+                        NULL ||
                     index >=
-                        frame->closure->upvalue_count ||
+                        frame->closure
+                            ->upvalue_count ||
                     !peek_value(
-                        vm, &a, span
+                        vm,
+                        &a,
+                        span
                     )
                 ) {
                     return false;
@@ -1470,7 +1978,9 @@ bool lune_vm_run(
                     );
                 }
 
-                if (!push(vm, a, span)) {
+                if (!push(
+                    vm, a, span
+                )) {
                     return false;
                 }
                 break;
@@ -1494,7 +2004,9 @@ bool lune_vm_run(
                         &name
                     ) ||
                     !peek_value(
-                        vm, &a, span
+                        vm,
+                        &a,
+                        span
                     )
                 ) {
                     return false;
@@ -1547,7 +2059,9 @@ bool lune_vm_run(
                         &name
                     ) ||
                     !peek_value(
-                        vm, &a, span
+                        vm,
+                        &a,
+                        span
                     )
                 ) {
                     return false;
@@ -1642,7 +2156,9 @@ bool lune_vm_run(
             case LUNE_OP_DIVIDE:
             case LUNE_OP_MODULO:
                 if (!arithmetic(
-                    vm, opcode, span
+                    vm,
+                    opcode,
+                    span
                 )) {
                     return false;
                 }
@@ -1651,8 +2167,16 @@ bool lune_vm_run(
             case LUNE_OP_EQUAL:
             case LUNE_OP_NOT_EQUAL:
                 if (
-                    !pop(vm, &b, span) ||
-                    !pop(vm, &a, span)
+                    !pop(
+                        vm,
+                        &b,
+                        span
+                    ) ||
+                    !pop(
+                        vm,
+                        &a,
+                        span
+                    )
                 ) {
                     return false;
                 }
@@ -1680,7 +2204,9 @@ bool lune_vm_run(
             case LUNE_OP_GREATER:
             case LUNE_OP_GREATER_EQUAL:
                 if (!compare(
-                    vm, opcode, span
+                    vm,
+                    opcode,
+                    span
                 )) {
                     return false;
                 }
@@ -1688,7 +2214,9 @@ bool lune_vm_run(
 
             case LUNE_OP_NOT:
                 if (!pop(
-                    vm, &a, span
+                    vm,
+                    &a,
+                    span
                 )) {
                     return false;
                 }
@@ -1696,7 +2224,9 @@ bool lune_vm_run(
                 if (!push(
                     vm,
                     lune_value_bool(
-                        !lune_value_truthy(a)
+                        !lune_value_truthy(
+                            a
+                        )
                     ),
                     span
                 )) {
@@ -1706,7 +2236,9 @@ bool lune_vm_run(
 
             case LUNE_OP_NEGATE:
                 if (!pop(
-                    vm, &a, span
+                    vm,
+                    &a,
+                    span
                 )) {
                     return false;
                 }
@@ -1765,8 +2297,10 @@ bool lune_vm_run(
                         &index,
                         span
                     ) ||
-                    frame->ip + index >
-                        frame->chunk->count
+                    frame->ip +
+                        index >
+                        frame->chunk
+                            ->count
                 ) {
                     return runtime_error(
                         vm,
@@ -1787,16 +2321,22 @@ bool lune_vm_run(
                         span
                     ) ||
                     !peek_value(
-                        vm, &a, span
+                        vm,
+                        &a,
+                        span
                     )
                 ) {
                     return false;
                 }
 
-                if (!lune_value_truthy(a)) {
+                if (!lune_value_truthy(
+                    a
+                )) {
                     if (
-                        frame->ip + index >
-                        frame->chunk->count
+                        frame->ip +
+                            index >
+                        frame->chunk
+                            ->count
                     ) {
                         return runtime_error(
                             vm,
@@ -1805,7 +2345,8 @@ bool lune_vm_run(
                         );
                     }
 
-                    frame->ip += index;
+                    frame->ip +=
+                        index;
                 }
                 break;
 
@@ -1817,7 +2358,8 @@ bool lune_vm_run(
                         &index,
                         span
                     ) ||
-                    index > frame->ip
+                    index >
+                        frame->ip
                 ) {
                     return runtime_error(
                         vm,
@@ -1856,10 +2398,13 @@ bool lune_vm_run(
                     lune_closure_new(
                         &vm->heap,
                         function,
-                        function->upvalue_count
+                        function
+                            ->upvalue_count
                     );
 
-                if (closure == NULL) {
+                if (
+                    closure == NULL
+                ) {
                     return runtime_error(
                         vm,
                         span,
@@ -1867,14 +2412,30 @@ bool lune_vm_run(
                     );
                 }
 
+                /*
+                 * Root the closure before capture_upvalue()
+                 * performs any further allocations.
+                 */
+                if (!push(
+                    vm,
+                    lune_value_obj(
+                        (LuneObj *)closure
+                    ),
+                    span
+                )) {
+                    return false;
+                }
+
                 for (
                     size_t i = 0;
                     i <
-                        function->upvalue_count;
+                        function
+                            ->upvalue_count;
                     i++
                 ) {
                     LuneUpvalueDesc desc =
-                        function->upvalues[i];
+                        function
+                            ->upvalues[i];
 
                     if (desc.is_local) {
                         if (
@@ -1888,16 +2449,19 @@ bool lune_vm_run(
                             );
                         }
 
-                        closure->upvalues[i] =
+                        closure
+                            ->upvalues[i] =
                             capture_upvalue(
                                 vm,
-                                &frame->locals[
-                                    desc.index
-                                ]
+                                &frame
+                                    ->locals[
+                                        desc.index
+                                    ]
                             );
 
                         if (
-                            closure->upvalues[i] ==
+                            closure
+                                ->upvalues[i] ==
                             NULL
                         ) {
                             return runtime_error(
@@ -1921,7 +2485,8 @@ bool lune_vm_run(
                             );
                         }
 
-                        closure->upvalues[i] =
+                        closure
+                            ->upvalues[i] =
                             frame->closure
                                 ->upvalues[
                                     desc.index
@@ -1929,15 +2494,6 @@ bool lune_vm_run(
                     }
                 }
 
-                if (!push(
-                    vm,
-                    lune_value_obj(
-                        (LuneObj *)closure
-                    ),
-                    span
-                )) {
-                    return false;
-                }
                 break;
             }
 
@@ -1952,7 +2508,9 @@ bool lune_vm_run(
                 }
 
                 if (!call_value(
-                    vm, index, span
+                    vm,
+                    index,
+                    span
                 )) {
                     return false;
                 }
@@ -1960,7 +2518,9 @@ bool lune_vm_run(
 
             case LUNE_OP_RETURN: {
                 if (!pop(
-                    vm, &a, span
+                    vm,
+                    &a,
+                    span
                 )) {
                     return false;
                 }
@@ -1972,17 +2532,27 @@ bool lune_vm_run(
                 size_t stack_base =
                     frame->stack_base;
 
-                if (vm->frame_count == 1) {
+                if (
+                    vm->frame_count ==
+                    1
+                ) {
                     vm->stack_count =
                         stack_base;
 
-                    if (result != NULL) {
+                    vm->last_result = a;
+                    vm->has_result = true;
+
+                    if (
+                        result != NULL
+                    ) {
                         *result = a;
                     }
+
                     return true;
                 }
 
                 vm->frame_count--;
+
                 vm->stack_count =
                     stack_base;
 
