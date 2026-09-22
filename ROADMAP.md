@@ -157,12 +157,16 @@ Avoid mirroring every grammar production in the AST.
 
 Start with a stack VM unless benchmarks demonstrate a reason to change.
 
+### Current status
+
+A scalar bytecode path is executable: null/bool/int/float values, arithmetic/comparison, lexical locals, globals, short-circuiting, `if`, and `while`. Strings, collections, functions/calls, closures, and native functions remain intentionally incomplete.
+
 ### Runtime values
 
-- [ ] `null`
-- [ ] boolean
-- [ ] integer / numeric representation
-- [ ] floating-point representation if separate from integers
+- [x] `null`
+- [x] boolean
+- [x] integer / numeric representation
+- [x] floating-point representation if separate from integers
 - [ ] string
 - [ ] list
 - [ ] map
@@ -172,17 +176,17 @@ Start with a stack VM unless benchmarks demonstrate a reason to change.
 
 ### VM
 
-- [ ] Constant pool.
-- [ ] Operand stack.
+- [x] Constant pool.
+- [x] Operand stack.
 - [ ] Call frames.
-- [ ] Locals.
-- [ ] Globals.
-- [ ] Jumps.
+- [x] Locals.
+- [x] Globals.
+- [x] Jumps.
 - [ ] Function calls.
 - [ ] Closures and upvalues.
 - [ ] Indexing.
 - [ ] Member access.
-- [ ] Runtime errors with source locations.
+- [x] Runtime errors with source locations.
 
 A first instruction set should remain compact, roughly along these lines:
 
@@ -233,10 +237,10 @@ The exact instruction set is allowed to change while the VM is young.
 
 - [ ] Compile literals.
 - [ ] Compile expressions.
-- [ ] Compile declarations and assignment.
-- [ ] Compile short-circuit operators.
-- [ ] Compile conditionals.
-- [ ] Compile loops.
+- [x] Compile declarations and identifier assignment; collection targets remain with collections.
+- [x] Compile short-circuit operators.
+- [x] Compile conditionals.
+- [x] Compile loops.
 - [ ] Compile functions.
 - [ ] Compile closures.
 - [ ] Compile collections.
