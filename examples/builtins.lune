@@ -1,0 +1,4 @@
+print("type:", type(args))
+print("argc:", len(args))
+print("number:", int("42") + 1)
+print("missing env:", env("LUNE_EXAMPLE_VARIABLE_THAT_SHOULD_NOT_EXIST"))

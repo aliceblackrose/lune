@@ -300,13 +300,13 @@ Keep native APIs primitive. Implement higher-level behavior in Lune when practic
 
 ### Core built-ins
 
-- [ ] `print`
-- [ ] `type`
-- [ ] `len`
-- [ ] conversions
-- [ ] process arguments
-- [ ] environment access
-- [ ] exit status
+- [x] `print`
+- [x] `type`
+- [x] `len`
+- [x] conversions (`str`, `int`, `float`, `bool`)
+- [x] process arguments (`args`)
+- [x] environment access (`env`)
+- [x] exit status (`exit`)
 
 ### Files and processes
 

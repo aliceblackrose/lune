@@ -309,6 +309,23 @@ config := {host: "localhost", port: 8080}
 print(config.host)
 ```
 
+## Bootstrap runtime globals
+
+The bootstrap scripting runtime currently provides a small set of globals. These are library/runtime facilities rather than new core syntax.
+
+- `print(...values)` prints values separated by spaces and returns `null`.
+- `type(value)` returns `"null"`, `"bool"`, `"int"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"function"`.
+- `len(value)` returns the length of a string, list, or map. String length is measured in UTF-8 bytes.
+- `str(value)` converts scalar values to strings.
+- `int(value)` converts an integer, float, or decimal string to an integer.
+- `float(value)` converts a number or decimal string to a float.
+- `bool(value)` applies Lune truthiness and returns a boolean.
+- `args` is a list containing command-line arguments after the script path.
+- `env(name)` reads an environment variable and returns a string or `null` when it is absent.
+- `exit(status)` terminates the current script run with an integer status from 0 through 255.
+
+Conversion failures and invalid argument types are runtime errors.
+
 ## Intentionally absent from version 0
 
 Version 0 has no semicolons, `return`, `const`/`let`/`var`, classes, static types, generics, exceptions, destructuring, pattern matching, macros, async syntax, user-defined operators, dedicated `for` loop, or string interpolation.

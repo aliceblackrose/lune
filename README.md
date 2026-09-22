@@ -2,7 +2,7 @@
 
 Lune is an experimental small, modern scripting language designed around a minimal composable core, fast bytecode execution, and an eventually self-hosted compiler.
 
-Current status: **language design / bootstrap**.
+Current status: **executable bytecode runtime / scripting APIs in progress**.
 
 ```lune
 greet := fn(name) => "hello, " + name
@@ -28,11 +28,11 @@ make test
 
 ## Executing Lune
 
-The bootstrap VM currently executes numbers, booleans, null, strings, lists, maps, bindings, arithmetic/comparison, indexing/member access, mutation, short-circuit operators, `if`, and `while`.
+The bootstrap VM executes the complete v0 language core, including functions, closures, mutable collections, control flow, and native calls.
 
 ```sh
 ./bootstrap/build/lune-bootstrap run examples/scalars.lune
 ./bootstrap/build/lune-bootstrap eval examples/scalars.lune
 ```
 
-`eval` prints the script's final value and is intended as a bootstrap/debugging command. Functions, calls, closures/upvalues, and the native `print` function now execute through the bytecode VM.
+`eval` prints the script's final value and is intended as a bootstrap/debugging command. Runtime globals currently include `print`, `type`, `len`, `str`, `int`, `float`, `bool`, `args`, `env`, and `exit`. Script arguments may follow the file path, for example `lune-bootstrap run script.lune one two`.
