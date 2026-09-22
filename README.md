@@ -39,12 +39,13 @@ The bootstrap VM executes the complete v0 language core, including functions, cl
 
 ## Self-hosting
 
-The production compiler is being ported to Lune under `compiler/`. The self-hosted lexer and Pratt parser/AST are executable and tested through the bootstrap VM:
+The production compiler is being ported to Lune under `compiler/`. The self-hosted lexer, Pratt parser/AST, and bytecode emitter are executable and tested through the bootstrap VM:
 
 ```sh
 make test
 ./bootstrap/build/lune-bootstrap run compiler/test_lexer.lune
 ./bootstrap/build/lune-bootstrap run compiler/test_parser.lune
+./bootstrap/build/lune-bootstrap run compiler/test_compiler.lune
 ```
 
-The C frontend remains the bootstrap path until the parser and bytecode compiler ports are complete.
+The Lune emitter produces a deterministic in-memory chunk image with code bytes, source spans, constants, interned names, nested functions, and upvalue descriptors. The C frontend remains the bootstrap path until this image has a stable `.lbc` serialization/loader and bootstrap stages can execute it directly.
