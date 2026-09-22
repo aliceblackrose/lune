@@ -29,6 +29,16 @@ size_t lune_vm_heap_bytes(
     const LuneVM *vm
 );
 
+void lune_vm_set_process_args(
+    LuneVM *vm,
+    int argc,
+    const char *const *argv
+);
+bool lune_vm_exit_status(
+    const LuneVM *vm,
+    int *status
+);
+
 bool lune_vm_run(
     LuneVM *vm,
     const LuneChunk *chunk,

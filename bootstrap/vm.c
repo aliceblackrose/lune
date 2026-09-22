@@ -2,8 +2,11 @@
 
 #include "object.h"
 
+#include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,6 +39,13 @@ struct LuneVM {
 
     LuneValue last_result;
     bool has_result;
+
+    int process_argc;
+    const char *const *process_argv;
+
+    bool exit_requested;
+    int exit_status;
+    LuneSpan native_span;
 
     LuneDiagnosticFn diagnostic;
     void *diagnostic_context;
@@ -1126,10 +1136,50 @@ static void close_frame_upvalues(
     }
 }
 
-static LuneValue native_print(
-    int argc,
-    const LuneValue *args
+static bool native_error(
+    LuneVM *vm,
+    const char *message
 ) {
+    return runtime_error(
+        vm,
+        vm->native_span,
+        message
+    );
+}
+
+static bool make_string_value(
+    LuneVM *vm,
+    const char *chars,
+    size_t length,
+    LuneValue *result
+) {
+    LuneObjString *string =
+        lune_string_new(
+            &vm->heap,
+            chars,
+            length
+        );
+
+    if (string == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    *result = lune_value_obj(
+        (LuneObj *)string
+    );
+    return true;
+}
+
+static bool native_print(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)vm;
+
     for (
         int i = 0;
         i < argc;
@@ -1145,37 +1195,530 @@ static LuneValue native_print(
     }
 
     fputc('\n', stdout);
-    return lune_value_null();
+    *result = lune_value_null();
+    return true;
 }
 
-static bool define_native(
-    LuneVM *vm,
-    const char *name,
-    int arity,
-    LuneNativeFn function
+static const char *value_type_name(
+    LuneValue value
 ) {
-    LuneObjNative *native =
-        lune_native_new(
-            &vm->heap,
-            name,
-            arity,
-            function
-        );
-
-    if (native == NULL) {
-        return false;
+    switch (value.kind) {
+        case LUNE_VALUE_NULL:
+            return "null";
+        case LUNE_VALUE_BOOL:
+            return "bool";
+        case LUNE_VALUE_INT:
+            return "int";
+        case LUNE_VALUE_FLOAT:
+            return "float";
+        case LUNE_VALUE_OBJ:
+            break;
     }
 
-    /*
-     * lune_map_set_chars() may allocate a
-     * string key and therefore collect. Root
-     * the new native on the VM stack first.
-     */
+    if (lune_obj_is_string(value.as.object)) {
+        return "string";
+    }
+    if (lune_obj_is_list(value.as.object)) {
+        return "list";
+    }
+    if (lune_obj_is_map(value.as.object)) {
+        return "map";
+    }
+    if (
+        lune_obj_is_closure(value.as.object) ||
+        lune_obj_is_native(value.as.object)
+    ) {
+        return "function";
+    }
+
+    return "unknown";
+}
+
+static bool native_type(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+    const char *name =
+        value_type_name(args[0]);
+
+    return make_string_value(
+        vm,
+        name,
+        strlen(name),
+        result
+    );
+}
+
+static bool native_len(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    if (
+        args[0].kind ==
+            LUNE_VALUE_OBJ &&
+        lune_obj_is_string(
+            args[0].as.object
+        )
+    ) {
+        LuneObjString *string =
+            (LuneObjString *)
+                args[0].as.object;
+
+        if (
+            string->length >
+            (size_t)INT64_MAX
+        ) {
+            return native_error(
+                vm,
+                "string length is too large"
+            );
+        }
+
+        *result = lune_value_int(
+            (int64_t)string->length
+        );
+        return true;
+    }
+
+    if (
+        args[0].kind ==
+            LUNE_VALUE_OBJ &&
+        lune_obj_is_list(
+            args[0].as.object
+        )
+    ) {
+        LuneObjList *list =
+            (LuneObjList *)
+                args[0].as.object;
+
+        if (
+            list->count >
+            (size_t)INT64_MAX
+        ) {
+            return native_error(
+                vm,
+                "list length is too large"
+            );
+        }
+
+        *result = lune_value_int(
+            (int64_t)list->count
+        );
+        return true;
+    }
+
+    if (
+        args[0].kind ==
+            LUNE_VALUE_OBJ &&
+        lune_obj_is_map(
+            args[0].as.object
+        )
+    ) {
+        LuneObjMap *map =
+            (LuneObjMap *)
+                args[0].as.object;
+
+        if (
+            map->count >
+            (size_t)INT64_MAX
+        ) {
+            return native_error(
+                vm,
+                "map length is too large"
+            );
+        }
+
+        *result = lune_value_int(
+            (int64_t)map->count
+        );
+        return true;
+    }
+
+    return native_error(
+        vm,
+        "len() expects a string, list, or map"
+    );
+}
+
+static bool native_str(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    if (
+        args[0].kind ==
+            LUNE_VALUE_OBJ &&
+        lune_obj_is_string(
+            args[0].as.object
+        )
+    ) {
+        *result = args[0];
+        return true;
+    }
+
+    char buffer[64];
+    const char *chars = buffer;
+    size_t length = 0;
+
+    switch (args[0].kind) {
+        case LUNE_VALUE_NULL:
+            chars = "null";
+            length = 4;
+            break;
+
+        case LUNE_VALUE_BOOL:
+            chars = args[0].as.boolean
+                ? "true"
+                : "false";
+            length = args[0].as.boolean
+                ? 4
+                : 5;
+            break;
+
+        case LUNE_VALUE_INT: {
+            int written = snprintf(
+                buffer,
+                sizeof(buffer),
+                "%lld",
+                (long long)
+                    args[0].as.integer
+            );
+
+            if (
+                written < 0 ||
+                (size_t)written >=
+                    sizeof(buffer)
+            ) {
+                return native_error(
+                    vm,
+                    "integer conversion failed"
+                );
+            }
+
+            length = (size_t)written;
+            break;
+        }
+
+        case LUNE_VALUE_FLOAT: {
+            int written = snprintf(
+                buffer,
+                sizeof(buffer),
+                "%.17g",
+                args[0].as.floating
+            );
+
+            if (
+                written < 0 ||
+                (size_t)written >=
+                    sizeof(buffer)
+            ) {
+                return native_error(
+                    vm,
+                    "float conversion failed"
+                );
+            }
+
+            length = (size_t)written;
+            break;
+        }
+
+        case LUNE_VALUE_OBJ:
+            return native_error(
+                vm,
+                "str() only converts scalar values"
+            );
+    }
+
+    return make_string_value(
+        vm,
+        chars,
+        length,
+        result
+    );
+}
+
+static bool string_to_int(
+    LuneVM *vm,
+    LuneObjString *string,
+    LuneValue *result
+) {
+    errno = 0;
+    char *end = NULL;
+
+    long long value =
+        strtoll(
+            string->chars,
+            &end,
+            10
+        );
+
+    if (
+        errno == ERANGE ||
+        end == string->chars ||
+        end !=
+            string->chars +
+                string->length
+    ) {
+        return native_error(
+            vm,
+            "int() could not parse string"
+        );
+    }
+
+    *result = lune_value_int(
+        (int64_t)value
+    );
+    return true;
+}
+
+static bool native_int(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    if (
+        args[0].kind ==
+        LUNE_VALUE_INT
+    ) {
+        *result = args[0];
+        return true;
+    }
+
+    if (
+        args[0].kind ==
+        LUNE_VALUE_FLOAT
+    ) {
+        long double value =
+            (long double)
+                args[0].as.floating;
+
+        if (
+            !isfinite(
+                args[0].as.floating
+            ) ||
+            value <
+                (long double)INT64_MIN ||
+            value >
+                (long double)INT64_MAX
+        ) {
+            return native_error(
+                vm,
+                "int() value is out of range"
+            );
+        }
+
+        *result = lune_value_int(
+            (int64_t)
+                args[0].as.floating
+        );
+        return true;
+    }
+
+    if (
+        args[0].kind ==
+            LUNE_VALUE_OBJ &&
+        lune_obj_is_string(
+            args[0].as.object
+        )
+    ) {
+        return string_to_int(
+            vm,
+            (LuneObjString *)
+                args[0].as.object,
+            result
+        );
+    }
+
+    return native_error(
+        vm,
+        "int() expects an int, float, or string"
+    );
+}
+
+static bool native_float(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    if (
+        args[0].kind ==
+        LUNE_VALUE_FLOAT
+    ) {
+        *result = args[0];
+        return true;
+    }
+
+    if (
+        args[0].kind ==
+        LUNE_VALUE_INT
+    ) {
+        *result = lune_value_float(
+            (double)args[0].as.integer
+        );
+        return true;
+    }
+
+    if (
+        args[0].kind ==
+            LUNE_VALUE_OBJ &&
+        lune_obj_is_string(
+            args[0].as.object
+        )
+    ) {
+        LuneObjString *string =
+            (LuneObjString *)
+                args[0].as.object;
+
+        errno = 0;
+        char *end = NULL;
+        double value = strtod(
+            string->chars,
+            &end
+        );
+
+        if (
+            errno == ERANGE ||
+            end == string->chars ||
+            end !=
+                string->chars +
+                    string->length
+        ) {
+            return native_error(
+                vm,
+                "float() could not parse string"
+            );
+        }
+
+        *result =
+            lune_value_float(value);
+        return true;
+    }
+
+    return native_error(
+        vm,
+        "float() expects a number or string"
+    );
+}
+
+static bool native_bool(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)vm;
+    (void)argc;
+
+    *result = lune_value_bool(
+        lune_value_truthy(args[0])
+    );
+    return true;
+}
+
+static bool native_env(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *name =
+        as_string(args[0]);
+
+    if (name == NULL) {
+        return native_error(
+            vm,
+            "env() expects a string name"
+        );
+    }
+
+    if (
+        strlen(name->chars) !=
+        name->length
+    ) {
+        return native_error(
+            vm,
+            "environment variable name contains NUL"
+        );
+    }
+
+    const char *value =
+        getenv(name->chars);
+
+    if (value == NULL) {
+        *result = lune_value_null();
+        return true;
+    }
+
+    return make_string_value(
+        vm,
+        value,
+        strlen(value),
+        result
+    );
+}
+
+static bool native_exit(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    if (
+        args[0].kind !=
+        LUNE_VALUE_INT
+    ) {
+        return native_error(
+            vm,
+            "exit() expects an integer status"
+        );
+    }
+
+    if (
+        args[0].as.integer < 0 ||
+        args[0].as.integer > 255
+    ) {
+        return native_error(
+            vm,
+            "exit() status must be between 0 and 255"
+        );
+    }
+
+    vm->exit_requested = true;
+    vm->exit_status =
+        (int)args[0].as.integer;
+
+    *result = lune_value_null();
+    return true;
+}
+
+static bool define_global_value(
+    LuneVM *vm,
+    const char *name,
+    LuneValue value
+) {
     if (!push(
         vm,
-        lune_value_obj(
-            (LuneObj *)native
-        ),
+        value,
         (LuneSpan){0}
     )) {
         return false;
@@ -1202,6 +1745,113 @@ static bool define_native(
     }
 
     return ok;
+}
+
+static bool define_native(
+    LuneVM *vm,
+    const char *name,
+    int arity,
+    LuneNativeFn function
+) {
+    LuneObjNative *native =
+        lune_native_new(
+            &vm->heap,
+            name,
+            arity,
+            function
+        );
+
+    if (native == NULL) {
+        return false;
+    }
+
+    return define_global_value(
+        vm,
+        name,
+        lune_value_obj(
+            (LuneObj *)native
+        )
+    );
+}
+
+static bool define_process_args(
+    LuneVM *vm
+) {
+    size_t count =
+        vm->process_argc < 0
+        ? 0
+        : (size_t)vm->process_argc;
+
+    LuneValue *items = NULL;
+
+    if (count > 0) {
+        if (
+            count >
+            SIZE_MAX /
+                sizeof(*items)
+        ) {
+            return false;
+        }
+
+        items = calloc(
+            count,
+            sizeof(*items)
+        );
+
+        if (items == NULL) {
+            return false;
+        }
+    }
+
+    LuneObjList *list =
+        lune_list_new(
+            &vm->heap,
+            items,
+            count
+        );
+
+    free(items);
+
+    if (list == NULL) {
+        return false;
+    }
+
+    if (!define_global_value(
+        vm,
+        "args",
+        lune_value_obj(
+            (LuneObj *)list
+        )
+    )) {
+        return false;
+    }
+
+    for (
+        size_t i = 0;
+        i < count;
+        i++
+    ) {
+        const char *argument =
+            vm->process_argv[i];
+
+        LuneObjString *string =
+            lune_string_new(
+                &vm->heap,
+                argument,
+                strlen(argument)
+            );
+
+        if (string == NULL) {
+            return false;
+        }
+
+        list->items[i] =
+            lune_value_obj(
+                (LuneObj *)string
+            );
+    }
+
+    return true;
 }
 
 static bool call_closure(
@@ -1291,11 +1941,19 @@ static bool call_native(
     }
 
     LuneValue result =
-        native->function(
-            (int)argc,
-            vm->stack +
-                callee_index + 1
-        );
+        lune_value_null();
+
+    vm->native_span = span;
+
+    if (!native->function(
+        vm,
+        (int)argc,
+        vm->stack +
+            callee_index + 1,
+        &result
+    )) {
+        return false;
+    }
 
     vm->stack_count =
         callee_index;
@@ -1401,6 +2059,30 @@ void lune_vm_free(
     free(vm);
 }
 
+void lune_vm_set_process_args(
+    LuneVM *vm,
+    int argc,
+    const char *const *argv
+) {
+    vm->process_argc = argc;
+    vm->process_argv = argv;
+}
+
+bool lune_vm_exit_status(
+    const LuneVM *vm,
+    int *status
+) {
+    if (!vm->exit_requested) {
+        return false;
+    }
+
+    if (status != NULL) {
+        *status = vm->exit_status;
+    }
+
+    return true;
+}
+
 void lune_vm_set_gc_stress(
     LuneVM *vm,
     bool enabled
@@ -1444,6 +2126,10 @@ static bool prepare_run(
     vm->has_result = false;
     vm->last_result =
         lune_value_null();
+    vm->exit_requested = false;
+    vm->exit_status = 0;
+    vm->native_span =
+        (LuneSpan){0};
 
     lune_heap_free(
         &vm->heap
@@ -1468,12 +2154,39 @@ static bool prepare_run(
         return false;
     }
 
-    if (!define_native(
-        vm,
-        "print",
-        -1,
-        native_print
-    )) {
+    if (!define_process_args(vm)) {
+        return false;
+    }
+
+    if (
+        !define_native(
+            vm, "print", -1, native_print
+        ) ||
+        !define_native(
+            vm, "type", 1, native_type
+        ) ||
+        !define_native(
+            vm, "len", 1, native_len
+        ) ||
+        !define_native(
+            vm, "str", 1, native_str
+        ) ||
+        !define_native(
+            vm, "int", 1, native_int
+        ) ||
+        !define_native(
+            vm, "float", 1, native_float
+        ) ||
+        !define_native(
+            vm, "bool", 1, native_bool
+        ) ||
+        !define_native(
+            vm, "env", 1, native_env
+        ) ||
+        !define_native(
+            vm, "exit", 1, native_exit
+        )
+    ) {
         return false;
     }
 
@@ -2513,6 +3226,19 @@ bool lune_vm_run(
                     span
                 )) {
                     return false;
+                }
+
+                if (vm->exit_requested) {
+                    vm->last_result =
+                        lune_value_null();
+                    vm->has_result = true;
+
+                    if (result != NULL) {
+                        *result =
+                            vm->last_result;
+                    }
+
+                    return true;
                 }
                 break;
 

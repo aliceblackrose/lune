@@ -42,8 +42,10 @@ static void fail(
     failures++;
 }
 
-static EvalResult eval(
-    const char *source
+static EvalResult eval_with_args(
+    const char *source,
+    int process_argc,
+    const char *const *process_argv
 ) {
     Diagnostics diagnostics = {0};
 
@@ -94,6 +96,11 @@ static EvalResult eval(
         );
 
         if (vm != NULL) {
+            lune_vm_set_process_args(
+                vm,
+                process_argc,
+                process_argv
+            );
             lune_vm_set_gc_stress(
                 vm, true
             );
@@ -117,6 +124,14 @@ static EvalResult eval(
         .diagnostics =
             diagnostics.count,
     };
+}
+
+static EvalResult eval(
+    const char *source
+) {
+    return eval_with_args(
+        source, 0, NULL
+    );
 }
 
 static void close_result(
@@ -571,6 +586,168 @@ int main(void) {
     expect_null(
         "native-print",
         "print(\"native print ok\")\n"
+    );
+
+    expect_string(
+        "type-string",
+        "type([1, 2, 3])\n",
+        "list",
+        4
+    );
+
+    expect_int(
+        "len-string-bytes",
+        "len(\"rocket: \\u{1F680}\")\n",
+        12
+    );
+
+    expect_int(
+        "len-list",
+        "len([1, 2, 3, 4])\n",
+        4
+    );
+
+    expect_int(
+        "len-map",
+        "len({a: 1, b: 2})\n",
+        2
+    );
+
+    expect_string(
+        "str-int",
+        "str(-42)\n",
+        "-42",
+        3
+    );
+
+    expect_int(
+        "int-string",
+        "int(\"12345\")\n",
+        12345
+    );
+
+    {
+        EvalResult converted =
+            eval("float(\"3.5\")\n");
+
+        if (
+            !converted.ok ||
+            converted.value.kind !=
+                LUNE_VALUE_FLOAT ||
+            converted.value.as.floating !=
+                3.5
+        ) {
+            fail(
+                "float-string",
+                "unexpected result"
+            );
+        }
+
+        close_result(&converted);
+    }
+
+    expect_bool(
+        "bool-null",
+        "bool(null)\n",
+        false
+    );
+
+    expect_null(
+        "env-missing",
+        "env(\"LUNE_TEST_VARIABLE_THAT_SHOULD_NOT_EXIST_9F5F6A\")\n"
+    );
+
+    {
+        const char *arguments[] = {
+            "alpha",
+            "beta",
+        };
+
+        EvalResult argument_result =
+            eval_with_args(
+                "args[1]\n",
+                2,
+                arguments
+            );
+
+        if (
+            !argument_result.ok ||
+            argument_result.value.kind !=
+                LUNE_VALUE_OBJ ||
+            !lune_obj_is_string(
+                argument_result
+                    .value.as.object
+            )
+        ) {
+            fail(
+                "process-args",
+                "expected string argument"
+            );
+        } else {
+            LuneObjString *string =
+                (LuneObjString *)
+                    argument_result
+                        .value.as.object;
+
+            if (
+                string->length != 4 ||
+                memcmp(
+                    string->chars,
+                    "beta",
+                    4
+                ) != 0
+            ) {
+                fail(
+                    "process-args",
+                    "unexpected argument"
+                );
+            }
+        }
+
+        close_result(
+            &argument_result
+        );
+    }
+
+    {
+        EvalResult exit_result =
+            eval(
+                "exit(23)\n"
+                "missing\n"
+            );
+
+        int status = -1;
+
+        if (
+            !exit_result.ok ||
+            !lune_vm_exit_status(
+                exit_result.vm,
+                &status
+            ) ||
+            status != 23
+        ) {
+            fail(
+                "exit-status",
+                "exit status was not preserved"
+            );
+        }
+
+        close_result(&exit_result);
+    }
+
+    expect_error(
+        "len-type-error",
+        "len(1)\n"
+    );
+
+    expect_error(
+        "int-parse-error",
+        "int(\"12x\")\n"
+    );
+
+    expect_error(
+        "exit-range-error",
+        "exit(300)\n"
     );
 
     expect_error(

@@ -127,7 +127,9 @@ static int execute_file(
     const char *path,
     const char *source,
     size_t length,
-    bool print_result
+    bool print_result,
+    int process_argc,
+    const char *const *process_argv
 ) {
     bool ok = false;
     LuneAst *ast = parse_source(path, source, length, &ok);
@@ -154,11 +156,29 @@ static int execute_file(
             fprintf(stderr, "%s: error: out of memory\n", path);
             ok = false;
         } else {
-            ok = lune_vm_run(vm, &chunk, &result);
+            lune_vm_set_process_args(
+                vm,
+                process_argc,
+                process_argv
+            );
+            ok = lune_vm_run(
+                vm, &chunk, &result
+            );
         }
     }
 
-    if (ok && print_result) {
+    int exit_status = 0;
+    bool requested_exit =
+        vm != NULL &&
+        lune_vm_exit_status(
+            vm, &exit_status
+        );
+
+    if (
+        ok &&
+        print_result &&
+        !requested_exit
+    ) {
         lune_value_print(stdout, result);
         putchar('\n');
     }
@@ -166,19 +186,32 @@ static int execute_file(
     lune_vm_free(vm);
     lune_chunk_free(&chunk);
     lune_ast_free(ast);
-    return ok ? 0 : 1;
+
+    if (!ok) return 1;
+    return requested_exit
+        ? exit_status
+        : 0;
 }
 
 static void usage(const char *program) {
     fprintf(
         stderr,
-        "usage: %s <lex|check|parse|run|eval> FILE\n",
+        "usage: %s <lex|check|parse|run|eval> FILE [ARGS...]\n",
         program
     );
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
+    if (argc < 3) {
+        usage(argv[0]);
+        return 2;
+    }
+
+    bool runtime_command =
+        strcmp(argv[1], "run") == 0 ||
+        strcmp(argv[1], "eval") == 0;
+
+    if (!runtime_command && argc != 3) {
         usage(argv[0]);
         return 2;
     }
@@ -202,9 +235,23 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[1], "parse") == 0) {
         result = parse_file(argv[2], source, length, true);
     } else if (strcmp(argv[1], "run") == 0) {
-        result = execute_file(argv[2], source, length, false);
+        result = execute_file(
+            argv[2],
+            source,
+            length,
+            false,
+            argc - 3,
+            (const char *const *)(argv + 3)
+        );
     } else if (strcmp(argv[1], "eval") == 0) {
-        result = execute_file(argv[2], source, length, true);
+        result = execute_file(
+            argv[2],
+            source,
+            length,
+            true,
+            argc - 3,
+            (const char *const *)(argv + 3)
+        );
     } else {
         usage(argv[0]);
         result = 2;

@@ -10,10 +10,13 @@
 typedef struct LuneFunction LuneFunction;
 typedef struct LuneObjUpvalue LuneObjUpvalue;
 typedef struct LuneHeap LuneHeap;
+typedef struct LuneVM LuneVM;
 
-typedef LuneValue (*LuneNativeFn)(
+typedef bool (*LuneNativeFn)(
+    LuneVM *vm,
     int argc,
-    const LuneValue *args
+    const LuneValue *args,
+    LuneValue *result
 );
 
 typedef void (*LuneMarkRootsFn)(
