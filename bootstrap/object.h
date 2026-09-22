@@ -48,6 +48,7 @@ typedef struct {
 typedef struct {
     LuneObj obj;
     size_t count;
+    size_t capacity;
     LuneValue *items;
 } LuneObjList;
 
@@ -139,6 +140,15 @@ LuneObjList *lune_list_new(
     LuneHeap *heap,
     const LuneValue *items,
     size_t count
+);
+bool lune_list_push(
+    LuneHeap *heap,
+    LuneObjList *list,
+    LuneValue value
+);
+bool lune_list_pop(
+    LuneObjList *list,
+    LuneValue *value
 );
 LuneObjMap *lune_map_new(
     LuneHeap *heap

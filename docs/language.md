@@ -326,6 +326,16 @@ The bootstrap scripting runtime currently provides a small set of globals. These
 
 Conversion failures and invalid argument types are runtime errors.
 
+Compiler-oriented primitives:
+
+- `push(list, value)` appends a value in place and returns the same list.
+- `pop(list)` removes and returns the final list element; an empty list is a runtime error.
+- `byte_at(text, index)` returns the unsigned byte value at a UTF-8 byte offset.
+- `slice(value, start, end)` returns a half-open `[start, end)` byte slice for strings or element slice for lists.
+- `bytes(values)` converts a list of integers from 0 through 255 into a raw-byte string. Lune strings may contain NUL bytes.
+
+These primitives are intentionally byte-oriented so the self-hosted lexer and bytecode compiler can work with source encodings and binary output without adding a separate byte-buffer value type.
+
 Collection helpers:
 
 - `each(items, fn)` calls `fn(item)` for each list element in order and returns the original list.

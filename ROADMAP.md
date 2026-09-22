@@ -362,12 +362,12 @@ The native VM remains the trusted execution substrate. The production compiler b
 
 Before beginning the port, Lune must be able to efficiently manipulate:
 
-- [ ] strings
-- [ ] lists
-- [ ] maps
-- [ ] byte buffers or equivalent
-- [ ] files
-- [ ] functions and closures
+- [x] strings
+- [x] lists
+- [x] maps
+- [x] byte buffers or equivalent (byte-oriented strings plus growable byte lists)
+- [x] files
+- [x] functions and closures
 
 ### Port
 

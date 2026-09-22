@@ -45,7 +45,7 @@ static size_t object_bytes(
             const LuneObjList *list =
                 (const LuneObjList *)object;
             return sizeof(*list) +
-                list->count *
+                list->capacity *
                     sizeof(*list->items);
         }
 
@@ -570,7 +570,82 @@ LuneObjList *lune_list_new(
     }
 
     list->count = count;
+    list->capacity = count;
     return list;
+}
+
+bool lune_list_push(
+    LuneHeap *heap,
+    LuneObjList *list,
+    LuneValue value
+) {
+    if (
+        list->count ==
+        list->capacity
+    ) {
+        size_t next =
+            list->capacity == 0
+            ? 8
+            : list->capacity * 2;
+
+        if (
+            next < list->capacity ||
+            next >
+                SIZE_MAX /
+                    sizeof(*list->items)
+        ) {
+            return false;
+        }
+
+        size_t old_bytes =
+            list->capacity *
+            sizeof(*list->items);
+
+        size_t new_bytes =
+            next *
+            sizeof(*list->items);
+
+        LuneValue *grown =
+            realloc(
+                list->items,
+                new_bytes
+            );
+
+        if (grown == NULL) {
+            return false;
+        }
+
+        list->items = grown;
+        list->capacity = next;
+
+        account_add(
+            heap,
+            new_bytes - old_bytes
+        );
+    }
+
+    list->items[list->count++] =
+        value;
+
+    return true;
+}
+
+bool lune_list_pop(
+    LuneObjList *list,
+    LuneValue *value
+) {
+    if (list->count == 0) {
+        return false;
+    }
+
+    list->count--;
+    *value = list->items[
+        list->count
+    ];
+    list->items[list->count] =
+        lune_value_null();
+
+    return true;
 }
 
 LuneObjMap *lune_map_new(

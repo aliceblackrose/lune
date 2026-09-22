@@ -1790,6 +1790,310 @@ static bool native_len(
     );
 }
 
+static bool native_push(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *list =
+        as_list(args[0]);
+
+    if (list == NULL) {
+        return native_error(
+            vm,
+            "push() expects a list"
+        );
+    }
+
+    if (!lune_list_push(
+        &vm->heap,
+        list,
+        args[1]
+    )) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    *result = args[0];
+    return true;
+}
+
+static bool native_pop(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *list =
+        as_list(args[0]);
+
+    if (list == NULL) {
+        return native_error(
+            vm,
+            "pop() expects a list"
+        );
+    }
+
+    if (!lune_list_pop(
+        list, result
+    )) {
+        return native_error(
+            vm,
+            "pop() cannot remove from an empty list"
+        );
+    }
+
+    return true;
+}
+
+static bool native_byte_at(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *string =
+        as_string(args[0]);
+
+    if (
+        string == NULL ||
+        args[1].kind !=
+            LUNE_VALUE_INT
+    ) {
+        return native_error(
+            vm,
+            "byte_at() expects a string and integer index"
+        );
+    }
+
+    if (
+        args[1].as.integer < 0 ||
+        (uint64_t)
+            args[1].as.integer >=
+            string->length
+    ) {
+        return native_error(
+            vm,
+            "byte_at() index is out of range"
+        );
+    }
+
+    unsigned char byte =
+        (unsigned char)
+            string->chars[
+                (size_t)
+                    args[1].as.integer
+            ];
+
+    *result = lune_value_int(
+        (int64_t)byte
+    );
+    return true;
+}
+
+static bool slice_bounds(
+    LuneVM *vm,
+    LuneValue start_value,
+    LuneValue end_value,
+    size_t length,
+    size_t *start,
+    size_t *end
+) {
+    if (
+        start_value.kind !=
+            LUNE_VALUE_INT ||
+        end_value.kind !=
+            LUNE_VALUE_INT
+    ) {
+        return native_error(
+            vm,
+            "slice() bounds must be integers"
+        );
+    }
+
+    if (
+        start_value.as.integer < 0 ||
+        end_value.as.integer < 0
+    ) {
+        return native_error(
+            vm,
+            "slice() bounds cannot be negative"
+        );
+    }
+
+    uint64_t start_u =
+        (uint64_t)
+            start_value.as.integer;
+    uint64_t end_u =
+        (uint64_t)
+            end_value.as.integer;
+
+    if (
+        start_u > end_u ||
+        end_u > length
+    ) {
+        return native_error(
+            vm,
+            "slice() bounds are out of range"
+        );
+    }
+
+    *start = (size_t)start_u;
+    *end = (size_t)end_u;
+    return true;
+}
+
+static bool native_slice(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    size_t start = 0;
+    size_t end = 0;
+
+    LuneObjString *string =
+        as_string(args[0]);
+
+    if (string != NULL) {
+        if (!slice_bounds(
+            vm,
+            args[1],
+            args[2],
+            string->length,
+            &start,
+            &end
+        )) {
+            return false;
+        }
+
+        return make_string_value(
+            vm,
+            string->chars + start,
+            end - start,
+            result
+        );
+    }
+
+    LuneObjList *list =
+        as_list(args[0]);
+
+    if (list != NULL) {
+        if (!slice_bounds(
+            vm,
+            args[1],
+            args[2],
+            list->count,
+            &start,
+            &end
+        )) {
+            return false;
+        }
+
+        LuneObjList *copy =
+            lune_list_new(
+                &vm->heap,
+                list->items + start,
+                end - start
+            );
+
+        if (copy == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+
+        *result = lune_value_obj(
+            (LuneObj *)copy
+        );
+        return true;
+    }
+
+    return native_error(
+        vm,
+        "slice() expects a string or list"
+    );
+}
+
+static bool native_bytes(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *list =
+        as_list(args[0]);
+
+    if (list == NULL) {
+        return native_error(
+            vm,
+            "bytes() expects a list"
+        );
+    }
+
+    char *buffer = NULL;
+
+    if (list->count > 0) {
+        buffer = malloc(
+            list->count
+        );
+
+        if (buffer == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+    }
+
+    for (
+        size_t i = 0;
+        i < list->count;
+        i++
+    ) {
+        LuneValue value =
+            list->items[i];
+
+        if (
+            value.kind !=
+                LUNE_VALUE_INT ||
+            value.as.integer < 0 ||
+            value.as.integer > 255
+        ) {
+            free(buffer);
+            return native_error(
+                vm,
+                "bytes() elements must be integers from 0 through 255"
+            );
+        }
+
+        buffer[i] =
+            (char)(unsigned char)
+                value.as.integer;
+    }
+
+    bool ok = make_string_value(
+        vm,
+        buffer,
+        list->count,
+        result
+    );
+
+    free(buffer);
+    return ok;
+}
+
 static bool scalar_text(
     LuneVM *vm,
     LuneValue value,
@@ -6608,6 +6912,24 @@ static bool prepare_run(
         ) ||
         !define_native(
             vm, "len", 1, native_len
+        ) ||
+        !define_native(
+            vm, "push", 2, native_push
+        ) ||
+        !define_native(
+            vm, "pop", 1, native_pop
+        ) ||
+        !define_native(
+            vm, "byte_at", 2,
+            native_byte_at
+        ) ||
+        !define_native(
+            vm, "slice", 3,
+            native_slice
+        ) ||
+        !define_native(
+            vm, "bytes", 1,
+            native_bytes
         ) ||
         !define_native(
             vm, "str", 1, native_str

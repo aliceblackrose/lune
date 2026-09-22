@@ -616,6 +616,73 @@ int main(void) {
         2
     );
 
+    expect_int(
+        "list-push",
+        "items := [1]\n"
+        "push(items, 2)\n"
+        "push(items, 3)\n"
+        "len(items) * 10 + items[2]\n",
+        33
+    );
+
+    expect_int(
+        "list-pop",
+        "items := [4, 5]\n"
+        "value := pop(items)\n"
+        "value * 10 + len(items)\n",
+        51
+    );
+
+    expect_int(
+        "byte-at",
+        "byte_at(\"A\\u{1F680}\", 0)\n",
+        65
+    );
+
+    expect_int(
+        "utf8-byte-at",
+        "byte_at(\"\\u{1F680}\", 0)\n",
+        240
+    );
+
+    expect_string(
+        "string-slice",
+        "slice(\"abcdef\", 1, 4)\n",
+        "bcd",
+        3
+    );
+
+    expect_int(
+        "list-slice",
+        "part := slice([10, 20, 30, 40], 1, 3)\n"
+        "part[0] + part[1]\n",
+        50
+    );
+
+    expect_int(
+        "bytes-roundtrip",
+        "data := bytes([0, 65, 255])\n"
+        "len(data) * 1000 + "
+        "byte_at(data, 1) * 10 + "
+        "byte_at(data, 2)\n",
+        3905
+    );
+
+    expect_error(
+        "pop-empty",
+        "pop([])\n"
+    );
+
+    expect_error(
+        "byte-range",
+        "bytes([256])\n"
+    );
+
+    expect_error(
+        "slice-range",
+        "slice(\"x\", 0, 2)\n"
+    );
+
     expect_string(
         "str-int",
         "str(-42)\n",
