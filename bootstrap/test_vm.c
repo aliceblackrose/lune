@@ -93,12 +93,18 @@ static EvalResult eval(
             &diagnostics
         );
 
-        ok = vm != NULL &&
-            lune_vm_run(
+        if (vm != NULL) {
+            lune_vm_set_gc_stress(
+                vm, true
+            );
+            ok = lune_vm_run(
                 vm,
                 &chunk,
                 &value
             );
+        } else {
+            ok = false;
+        }
     }
 
     lune_chunk_free(&chunk);
@@ -237,6 +243,104 @@ static void expect_error(
     }
 
     close_result(&result);
+}
+
+
+static void test_manual_gc(void) {
+    const char *source =
+        "i := 0\n"
+        "s := \"\"\n"
+        "while i < 200 {\n"
+        "  s = \"a\" + \"b\"\n"
+        "  i = i + 1\n"
+        "}\n"
+        "i\n";
+
+    Diagnostics diagnostics = {0};
+
+    LuneParser parser;
+    lune_parser_init(
+        &parser,
+        source,
+        strlen(source),
+        diagnostic,
+        &diagnostics
+    );
+
+    LuneAst *ast =
+        lune_parse_program(&parser);
+
+    if (
+        ast == NULL ||
+        parser.had_error
+    ) {
+        fail(
+            "manual-gc",
+            "test program did not parse"
+        );
+        lune_ast_free(ast);
+        return;
+    }
+
+    LuneChunk chunk;
+    lune_chunk_init(&chunk);
+
+    bool ok = lune_compile(
+        ast,
+        source,
+        &chunk,
+        diagnostic,
+        &diagnostics
+    );
+
+    LuneVM *vm = NULL;
+    LuneValue result =
+        lune_value_null();
+
+    if (ok) {
+        vm = lune_vm_new(
+            diagnostic,
+            &diagnostics
+        );
+
+        ok = vm != NULL &&
+            lune_vm_run(
+                vm,
+                &chunk,
+                &result
+            );
+    }
+
+    if (
+        !ok ||
+        result.kind !=
+            LUNE_VALUE_INT ||
+        result.as.integer != 200
+    ) {
+        fail(
+            "manual-gc",
+            "program did not execute"
+        );
+    } else {
+        size_t before =
+            lune_vm_heap_bytes(vm);
+
+        lune_vm_collect_garbage(vm);
+
+        size_t after =
+            lune_vm_heap_bytes(vm);
+
+        if (after >= before) {
+            fail(
+                "manual-gc",
+                "collector did not reclaim unreachable objects"
+            );
+        }
+    }
+
+    lune_vm_free(vm);
+    lune_chunk_free(&chunk);
+    lune_ast_free(ast);
 }
 
 int main(void) {
@@ -508,6 +612,21 @@ int main(void) {
         "mixed-string-add",
         "\"x\" + 1\n"
     );
+
+    expect_bool(
+        "gc-cycle-root",
+        "m := {}\n"
+        "m.self = m\n"
+        "i := 0\n"
+        "while i < 30 {\n"
+        "  temp := {root: m}\n"
+        "  i = i + 1\n"
+        "}\n"
+        "m.self == m\n",
+        true
+    );
+
+    test_manual_gc();
 
     if (failures != 0) {
         fprintf(
