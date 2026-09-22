@@ -51,46 +51,46 @@ The initial language should avoid classes, inheritance, generics, macros, annota
 
 ### Syntax
 
-- [ ] Replace the permissive token-stream grammar with actual language syntax.
-- [ ] Define newline-separated statements with no required semicolons.
-- [ ] Define comments.
-- [ ] Define identifiers and UTF-8 source handling.
-- [ ] Define literals:
-  - [ ] `null`
-  - [ ] booleans
-  - [ ] numbers
-  - [ ] strings
-  - [ ] lists
-  - [ ] maps
-- [ ] Define `:=` as declaration.
-- [ ] Define `=` as assignment to an existing binding.
-- [ ] Define arithmetic and comparison operators.
-- [ ] Define short-circuit `and`, `or`, and `not`.
-- [ ] Define function expressions: `fn(a, b) => expr`.
-- [ ] Define block-bodied functions.
-- [ ] Define expression-oriented `if / else`.
-- [ ] Define `while` as the primitive loop.
-- [ ] Define calls, indexing, and member access.
+- [x] Replace the permissive token-stream grammar with actual language syntax.
+- [x] Define newline-separated statements with no required semicolons.
+- [x] Define comments.
+- [x] Define identifiers and UTF-8 source handling.
+- [x] Define literals:
+  - [x] `null`
+  - [x] booleans
+  - [x] numbers
+  - [x] strings
+  - [x] lists
+  - [x] maps
+- [x] Define `:=` as declaration.
+- [x] Define `=` as assignment to an existing binding.
+- [x] Define arithmetic and comparison operators.
+- [x] Define short-circuit `and`, `or`, and `not`.
+- [x] Define function expressions: `fn(a, b) => expr`.
+- [x] Define block-bodied functions.
+- [x] Define expression-oriented `if / else`.
+- [x] Define `while` as the primitive loop.
+- [x] Define calls, indexing, and member access.
 
 ### Semantics
 
-- [ ] Specify lexical scope.
-- [ ] Specify closure capture and mutation.
-- [ ] Specify truthiness.
-- [ ] Specify numeric behavior.
-- [ ] Specify equality.
-- [ ] Specify block result values.
-- [ ] Specify evaluation order.
-- [ ] Specify runtime error behavior.
-- [ ] Decide whether map member access is equivalent to string-key indexing.
+- [x] Specify lexical scope.
+- [x] Specify closure capture and mutation.
+- [x] Specify truthiness.
+- [x] Specify numeric behavior.
+- [x] Specify equality.
+- [x] Specify block result values.
+- [x] Specify evaluation order.
+- [x] Specify runtime error behavior.
+- [x] Decide whether map member access is equivalent to string-key indexing.
 
 ### Deliverables
 
-- [ ] `docs/language.md`
-- [ ] Example programs under `examples/`
-- [ ] Parser tests for every accepted and rejected syntax form.
+- [x] `docs/language.md`
+- [x] Example programs under `examples/`
+- [x] Parser tests for every accepted and rejected syntax form.
 
-**Status:** language contract complete; executable parser tests continue in Milestone 1.
+**Status:** complete.
 
 **Done when:** the syntax and semantics of the core language can be described without referring to implementation details.
 
@@ -112,16 +112,16 @@ ANTLR may be used as an early reference/prototyping aid, but it is not part of t
 
 ### Parser
 
-- [ ] Hand-written parser.
-- [ ] Pratt parser for expressions.
-- [ ] Parse declarations and assignment.
-- [ ] Parse blocks.
-- [ ] Parse functions.
-- [ ] Parse `if / else`.
-- [ ] Parse `while`.
-- [ ] Parse list and map literals.
-- [ ] Parse calls, indexing, and member access.
-- [ ] Recover from common syntax errors well enough to report more than one diagnostic.
+- [x] Hand-written parser.
+- [x] Pratt parser for expressions.
+- [x] Parse declarations and assignment.
+- [x] Parse blocks.
+- [x] Parse functions.
+- [x] Parse `if / else`.
+- [x] Parse `while`.
+- [x] Parse list and map literals.
+- [x] Parse calls, indexing, and member access.
+- [x] Recover from common syntax errors well enough to report more than one diagnostic.
 
 ### Internal representation
 
@@ -144,6 +144,8 @@ Assign
 ```
 
 Avoid mirroring every grammar production in the AST.
+
+**Status:** complete. The C17 bootstrap frontend parses the syntax fixtures, validates AST structure and precedence, and recovers across independent syntax errors.
 
 **Done when:** representative Lune scripts parse into a compact AST with deterministic diagnostics.
 

@@ -22,4 +22,6 @@ The current bootstrap frontend is dependency-free C17.
 make
 make test
 ./bootstrap/build/lune-bootstrap lex examples/hello.lune
+./bootstrap/build/lune-bootstrap check examples/hello.lune
+./bootstrap/build/lune-bootstrap parse examples/hello.lune
 ```
