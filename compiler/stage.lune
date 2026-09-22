@@ -1,0 +1,60 @@
+compiler := import("./compiler")
+bytecode := import("./bytecode")
+
+if len(args) < 2 {
+    print(
+        "usage: stage.lune SOURCE OUTPUT [module]"
+    )
+    exit(2)
+}
+
+source_path := args[0]
+output_path := args[1]
+module_mode :=
+    len(args) >= 3 and
+    args[2] == "module"
+
+source := read_file(source_path)
+
+input := if module_mode {
+    "fn() => {\n" +
+    source +
+    "\n}\n"
+} else {
+    source
+}
+
+compiled := compiler.compile(input)
+
+if len(compiled.errors) > 0 {
+    i := 0
+
+    while i < len(compiled.errors) {
+        error := compiled.errors[i]
+
+        print(
+            source_path +
+            ":" +
+            str(error.line) +
+            ":" +
+            str(error.column) +
+            ": error: " +
+            error.message
+        )
+
+        i = i + 1
+    }
+
+    exit(1)
+}
+
+image := bytecode.encode(
+    compiled.chunk
+)
+
+write_file(
+    output_path,
+    image
+)
+
+null

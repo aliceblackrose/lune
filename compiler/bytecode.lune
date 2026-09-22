@@ -1,0 +1,173 @@
+append_u16 := fn(output, value) => {
+    push(output, value % 256)
+    push(output, int(value / 256) % 256)
+    null
+}
+
+append_u32 := fn(output, value) => {
+    push(output, value % 256)
+    push(output, int(value / 256) % 256)
+    push(output, int(value / 65536) % 256)
+    push(output, int(value / 16777216) % 256)
+    null
+}
+
+append_raw := fn(output, value) => {
+    i := 0
+
+    while i < len(value) {
+        push(
+            output,
+            byte_at(value, i)
+        )
+        i = i + 1
+    }
+
+    null
+}
+
+append_text := fn(output, value) => {
+    append_u32(output, len(value))
+    append_raw(output, value)
+    null
+}
+
+append_span := fn(output, span) => {
+    append_u32(output, span.start)
+    append_u32(output, span.length)
+    append_u32(output, span.line)
+    append_u32(output, span.column)
+    null
+}
+
+encode_chunk := null
+
+encode_function := fn(output, function) => {
+    append_u16(output, function.arity)
+    append_u16(
+        output,
+        len(function.upvalues)
+    )
+
+    i := 0
+
+    while i < len(function.upvalues) {
+        upvalue := function.upvalues[i]
+
+        push(
+            output,
+            if upvalue.is_local {
+                1
+            } else {
+                0
+            }
+        )
+
+        append_u16(
+            output,
+            upvalue.index
+        )
+
+        i = i + 1
+    }
+
+    encode_chunk(
+        output,
+        function.chunk
+    )
+
+    null
+}
+
+encode_chunk = fn(output, chunk) => {
+    append_u32(
+        output,
+        len(chunk.code)
+    )
+
+    i := 0
+    while i < len(chunk.code) {
+        push(output, chunk.code[i])
+        i = i + 1
+    }
+
+    i = 0
+    while i < len(chunk.spans) {
+        append_span(
+            output,
+            chunk.spans[i]
+        )
+        i = i + 1
+    }
+
+    append_u32(
+        output,
+        len(chunk.constants)
+    )
+
+    i = 0
+    while i < len(chunk.constants) {
+        value := chunk.constants[i]
+        kind := type(value)
+
+        if kind == "int" {
+            push(output, 0)
+        } else if kind == "float" {
+            push(output, 1)
+        } else {
+            print(
+                "unsupported bytecode constant:",
+                kind
+            )
+            exit(1)
+        }
+
+        append_text(
+            output,
+            str(value)
+        )
+
+        i = i + 1
+    }
+
+    append_u32(
+        output,
+        len(chunk.names)
+    )
+
+    i = 0
+    while i < len(chunk.names) {
+        append_text(
+            output,
+            chunk.names[i]
+        )
+        i = i + 1
+    }
+
+    append_u32(
+        output,
+        len(chunk.functions)
+    )
+
+    i = 0
+    while i < len(chunk.functions) {
+        encode_function(
+            output,
+            chunk.functions[i]
+        )
+        i = i + 1
+    }
+
+    null
+}
+
+encode := fn(chunk) => {
+    output := []
+    append_raw(output, "LUNEBC01")
+    encode_chunk(output, chunk)
+    bytes(output)
+}
+
+{
+    encode: encode,
+}
