@@ -330,8 +330,8 @@ Prefer library methods/functions over new loop or comprehension syntax.
 
 ### Data
 
-- [ ] JSON parse.
-- [ ] JSON serialize.
+- [x] JSON parse (`json_parse`).
+- [x] JSON serialize (`json_stringify`).
 
 ### Modules
 

@@ -35,4 +35,4 @@ The bootstrap VM executes the complete v0 language core, including functions, cl
 ./bootstrap/build/lune-bootstrap eval examples/scalars.lune
 ```
 
-`eval` prints the script's final value and is intended as a bootstrap/debugging command. Runtime globals currently include `print`, `type`, `len`, scalar conversions, `args`, `env`, `exit`, higher-order list helpers (`each`, `map`, `filter`, `reduce`), string helpers (`split`, `join`, `find`, `contains`, `format`), file/path helpers, and direct child-process execution via `exec`. Script arguments may follow the file path, for example `lune-bootstrap run script.lune one two`.
+`eval` prints the script's final value and is intended as a bootstrap/debugging command. Runtime globals currently include `print`, `type`, `len`, scalar conversions, `args`, `env`, `exit`, higher-order list helpers (`each`, `map`, `filter`, `reduce`), string helpers (`split`, `join`, `find`, `contains`, `format`), JSON parse/serialization, file/path helpers, and direct child-process execution via `exec`. Script arguments may follow the file path, for example `lune-bootstrap run script.lune one two`.

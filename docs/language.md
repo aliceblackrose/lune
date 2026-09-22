@@ -345,6 +345,11 @@ String helpers:
 
 String offsets and lengths are byte-oriented in the bootstrap runtime so UTF-8 source/compiler code can explicitly reason about encoded data.
 
+JSON helpers:
+
+- `json_parse(text)` parses strict JSON into Lune values. JSON objects become maps, arrays become lists, and integral numbers remain integers when they fit signed 64-bit.
+- `json_stringify(value)` serializes null, booleans, finite numbers, strings, lists, and maps. Functions and cyclic collection graphs are runtime errors.
+
 File/process primitives:
 
 - `read_file(path)` reads the complete file and returns its bytes as a Lune string.
