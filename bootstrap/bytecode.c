@@ -10,8 +10,14 @@ static bool grow(
     size_t needed
 ) {
     if (*capacity >= needed) return true;
+
     size_t next = *capacity == 0 ? 8 : *capacity;
-    while (next < needed) next *= 2;
+    while (next < needed) {
+        if (next > SIZE_MAX / 2) return false;
+        next *= 2;
+    }
+    if (next > SIZE_MAX / item_size) return false;
+
     void *grown = realloc(*items, next * item_size);
     if (grown == NULL) return false;
     *items = grown;
@@ -23,22 +29,40 @@ void lune_chunk_init(LuneChunk *chunk) {
     *chunk = (LuneChunk){0};
 }
 
+void lune_function_free(LuneFunction *function) {
+    if (function == NULL) return;
+    lune_chunk_free(&function->chunk);
+    free(function->upvalues);
+    free(function);
+}
+
 void lune_chunk_free(LuneChunk *chunk) {
     free(chunk->code);
     free(chunk->spans);
     free(chunk->constants);
+
     for (size_t i = 0; i < chunk->names_count; i++) {
         free(chunk->names[i].chars);
     }
     free(chunk->names);
+
+    for (size_t i = 0; i < chunk->functions_count; i++) {
+        lune_function_free(chunk->functions[i]);
+    }
+    free(chunk->functions);
+
     lune_chunk_init(chunk);
 }
 
 bool lune_chunk_write(LuneChunk *chunk, uint8_t byte, LuneSpan span) {
     if (chunk->count == chunk->capacity) {
         size_t next = chunk->capacity == 0 ? 16 : chunk->capacity * 2;
-        uint8_t *code = realloc(chunk->code, next * sizeof(*chunk->code));
+
+        uint8_t *code = realloc(
+            chunk->code, next * sizeof(*chunk->code)
+        );
         if (code == NULL) return false;
+
         LuneSpan *spans = realloc(
             chunk->spans, next * sizeof(*chunk->spans)
         );
@@ -46,6 +70,7 @@ bool lune_chunk_write(LuneChunk *chunk, uint8_t byte, LuneSpan span) {
             chunk->code = code;
             return false;
         }
+
         chunk->code = code;
         chunk->spans = spans;
         chunk->capacity = next;
@@ -82,8 +107,10 @@ bool lune_chunk_intern_name(
     uint16_t *index
 ) {
     for (size_t i = 0; i < chunk->names_count; i++) {
-        if (chunk->names[i].length == length &&
-            memcmp(chunk->names[i].chars, chars, length) == 0) {
+        if (
+            chunk->names[i].length == length &&
+            memcmp(chunk->names[i].chars, chars, length) == 0
+        ) {
             *index = (uint16_t)i;
             return true;
         }
@@ -110,6 +137,56 @@ bool lune_chunk_intern_name(
     return true;
 }
 
+bool lune_chunk_add_function(
+    LuneChunk *chunk,
+    LuneFunction *function,
+    uint16_t *index
+) {
+    if (chunk->functions_count >= UINT16_MAX) return false;
+    if (!grow(
+        (void **)&chunk->functions,
+        &chunk->functions_capacity,
+        sizeof(*chunk->functions),
+        chunk->functions_count + 1
+    )) return false;
+
+    *index = (uint16_t)chunk->functions_count;
+    chunk->functions[chunk->functions_count++] = function;
+    return true;
+}
+
+LuneFunction *lune_function_new(uint16_t arity) {
+    LuneFunction *function = calloc(1, sizeof(*function));
+    if (function == NULL) return NULL;
+    function->arity = arity;
+    lune_chunk_init(&function->chunk);
+    return function;
+}
+
+bool lune_function_set_upvalues(
+    LuneFunction *function,
+    const LuneUpvalueDesc *upvalues,
+    size_t count
+) {
+    if (count == 0) {
+        function->upvalue_count = 0;
+        return true;
+    }
+
+    if (count > SIZE_MAX / sizeof(*function->upvalues)) {
+        return false;
+    }
+    LuneUpvalueDesc *copy = malloc(
+        count * sizeof(*copy)
+    );
+    if (copy == NULL) return false;
+
+    memcpy(copy, upvalues, count * sizeof(*copy));
+    function->upvalues = copy;
+    function->upvalue_count = count;
+    return true;
+}
+
 const char *lune_opcode_name(LuneOpcode opcode) {
     static const char *names[] = {
         "CONSTANT",
@@ -122,6 +199,8 @@ const char *lune_opcode_name(LuneOpcode opcode) {
         "POP",
         "GET_LOCAL",
         "SET_LOCAL",
+        "GET_UPVALUE",
+        "SET_UPVALUE",
         "GET_GLOBAL",
         "DEFINE_GLOBAL",
         "SET_GLOBAL",
@@ -145,8 +224,11 @@ const char *lune_opcode_name(LuneOpcode opcode) {
         "JUMP",
         "JUMP_IF_FALSE",
         "LOOP",
+        "CLOSURE",
+        "CALL",
         "RETURN",
     };
+
     return (size_t)opcode < sizeof(names) / sizeof(names[0])
         ? names[opcode]
         : "UNKNOWN";
