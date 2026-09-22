@@ -9,10 +9,16 @@
 
 typedef struct LuneFunction LuneFunction;
 typedef struct LuneObjUpvalue LuneObjUpvalue;
+typedef struct LuneHeap LuneHeap;
 
 typedef LuneValue (*LuneNativeFn)(
     int argc,
     const LuneValue *args
+);
+
+typedef void (*LuneMarkRootsFn)(
+    void *context,
+    LuneHeap *heap
 );
 
 typedef enum {
@@ -26,6 +32,7 @@ typedef enum {
 
 struct LuneObj {
     LuneObjKind kind;
+    bool marked;
     LuneObj *next;
 };
 
@@ -74,12 +81,45 @@ typedef struct {
     LuneNativeFn function;
 } LuneObjNative;
 
-typedef struct {
+struct LuneHeap {
     LuneObj *objects;
-} LuneHeap;
 
-void lune_heap_init(LuneHeap *heap);
+    size_t bytes_allocated;
+    size_t next_gc;
+    bool stress_gc;
+
+    LuneObj **gray;
+    size_t gray_count;
+    size_t gray_capacity;
+    bool mark_failed;
+
+    LuneMarkRootsFn mark_roots;
+    void *mark_context;
+};
+
+void lune_heap_init(
+    LuneHeap *heap,
+    LuneMarkRootsFn mark_roots,
+    void *mark_context
+);
 void lune_heap_free(LuneHeap *heap);
+void lune_heap_set_stress(
+    LuneHeap *heap,
+    bool enabled
+);
+void lune_heap_collect(LuneHeap *heap);
+size_t lune_heap_bytes(
+    const LuneHeap *heap
+);
+
+void lune_heap_mark_value(
+    LuneHeap *heap,
+    LuneValue value
+);
+void lune_heap_mark_object(
+    LuneHeap *heap,
+    LuneObj *object
+);
 
 LuneObjString *lune_string_new(
     LuneHeap *heap,
@@ -96,7 +136,9 @@ LuneObjList *lune_list_new(
     const LuneValue *items,
     size_t count
 );
-LuneObjMap *lune_map_new(LuneHeap *heap);
+LuneObjMap *lune_map_new(
+    LuneHeap *heap
+);
 
 bool lune_map_get(
     const LuneObjMap *map,
@@ -139,12 +181,25 @@ LuneObjNative *lune_native_new(
     LuneNativeFn function
 );
 
-bool lune_obj_is_string(const LuneObj *object);
-bool lune_obj_is_list(const LuneObj *object);
-bool lune_obj_is_map(const LuneObj *object);
-bool lune_obj_is_closure(const LuneObj *object);
-bool lune_obj_is_native(const LuneObj *object);
+bool lune_obj_is_string(
+    const LuneObj *object
+);
+bool lune_obj_is_list(
+    const LuneObj *object
+);
+bool lune_obj_is_map(
+    const LuneObj *object
+);
+bool lune_obj_is_closure(
+    const LuneObj *object
+);
+bool lune_obj_is_native(
+    const LuneObj *object
+);
 
-void lune_object_print(FILE *out, const LuneObj *object);
+void lune_object_print(
+    FILE *out,
+    const LuneObj *object
+);
 
 #endif

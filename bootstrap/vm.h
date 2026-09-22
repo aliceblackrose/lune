@@ -6,6 +6,7 @@
 #include "value.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 
 typedef struct LuneVM LuneVM;
 
@@ -13,7 +14,20 @@ LuneVM *lune_vm_new(
     LuneDiagnosticFn diagnostic,
     void *diagnostic_context
 );
-void lune_vm_free(LuneVM *vm);
+void lune_vm_free(
+    LuneVM *vm
+);
+
+void lune_vm_set_gc_stress(
+    LuneVM *vm,
+    bool enabled
+);
+void lune_vm_collect_garbage(
+    LuneVM *vm
+);
+size_t lune_vm_heap_bytes(
+    const LuneVM *vm
+);
 
 bool lune_vm_run(
     LuneVM *vm,
