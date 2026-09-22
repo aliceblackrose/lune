@@ -360,6 +360,35 @@ File/process primitives:
 - `exec(program, arguments)` executes a program directly with a list of string arguments. It does not invoke a shell implicitly. The result is a map with integer `status` plus string `stdout` and `stderr` fields. A process terminated by a signal reports `128 + signal` as its status on POSIX platforms.
 
 
+## Modules
+
+`import(specifier)` loads a module and returns the module's final value.
+
+File modules use an explicit path-like specifier such as `"./config"`, `"lib/util"`, or an absolute path. If the path does not end in `.lune`, the extension is added automatically. Relative paths are resolved relative to the file containing the `import`, including nested imports, and existing paths are canonicalized before caching.
+
+A file module executes in its own lexical function scope. Its final expression is the exported module value:
+
+```lune
+// config.lune
+host := "localhost"
+
+{
+    host: host,
+    port: 8080,
+}
+```
+
+```lune
+config := import("./config")
+print(config.host)
+```
+
+Modules are evaluated at most once per VM run. Re-importing the same canonical file returns the identical cached value. Imports that encounter a module which is already being evaluated fail with a cyclic-import runtime error.
+
+Bare non-path specifiers name native modules. The bootstrap runtime currently exposes `import("json")`, which returns a map containing `parse` and `stringify`. Native and Lune modules therefore share the same `import` call shape.
+
+File modules can access runtime globals, but they do not implicitly capture local bindings from the importing file.
+
 ## Intentionally absent from version 0
 
 Version 0 has no semicolons, `return`, `const`/`let`/`var`, classes, static types, generics, exceptions, destructuring, pattern matching, macros, async syntax, user-defined operators, dedicated `for` loop, or string interpolation.

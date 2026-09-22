@@ -1,0 +1,6 @@
+// examples/modules.lune
+// The built-in json module uses the same import surface as file modules.
+json := import("json")
+
+value := json.parse("{\"answer\":42}")
+print(value.answer)

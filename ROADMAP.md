@@ -342,13 +342,13 @@ json := import("json")
 config := import("./config")
 ```
 
-- [ ] Module loading.
-- [ ] Module cache.
-- [ ] Clear module resolution rules.
-- [ ] Cyclic-import behavior specified.
-- [ ] Native modules and Lune modules exposed through the same user-facing mechanism where practical.
+- [x] Module loading.
+- [x] Module cache.
+- [x] Clear module resolution rules.
+- [x] Cyclic-import behavior specified.
+- [x] Native modules and Lune modules exposed through the same user-facing mechanism where practical.
 
-**Done when:** Lune can comfortably implement small command-line automation, file processing, JSON transformation, and process orchestration.
+**Status:** complete. The runtime now covers command-line/process access, files and paths, collection/string helpers, JSON, and cached native/file modules through `import`.\n\n**Done when:** Lune can comfortably implement small command-line automation, file processing, JSON transformation, and process orchestration.
 
 ---
 
