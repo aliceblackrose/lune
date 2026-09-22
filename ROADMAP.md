@@ -381,8 +381,8 @@ compiler/
 ```
 
 - [x] Port the lexer to Lune.
-- [ ] Port the Pratt parser to Lune.
-- [ ] Port AST representation to Lune.
+- [x] Port the Pratt parser to Lune.
+- [x] Port AST representation to Lune.
 - [ ] Port bytecode emission to Lune.
 - [ ] Compile the Lune compiler with the bootstrap compiler.
 - [ ] Run the generated compiler on the compiler source itself.
