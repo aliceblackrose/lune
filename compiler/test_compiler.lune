@@ -1,0 +1,207 @@
+compiler := import("./compiler")
+
+assert := fn(condition, message) =>
+    if condition {
+        null
+    } else {
+        print("self-hosted compiler test failed:", message)
+        exit(1)
+    }
+
+assert_code := fn(actual, expected, label) => {
+    assert(
+        len(actual) == len(expected),
+        label + " code length"
+    )
+
+    i := 0
+    while i < len(expected) {
+        assert(
+            actual[i] == expected[i],
+            label + " opcode at " + str(i)
+        )
+        i = i + 1
+    }
+
+    null
+}
+
+basic := compiler.compile(
+    "x := 1 + 2 * 3\n" +
+    "x\n"
+)
+
+assert(len(basic.errors) == 0, "basic compile errors")
+assert(basic.chunk != null, "basic chunk")
+assert(len(basic.chunk.constants) == 3, "basic constants")
+assert(basic.chunk.constants[0] == 1, "constant 1")
+assert(basic.chunk.constants[1] == 2, "constant 2")
+assert(basic.chunk.constants[2] == 3, "constant 3")
+assert(len(basic.chunk.names) == 1, "basic name count")
+assert(basic.chunk.names[0] == "x", "global name")
+
+assert_code(
+    basic.chunk.code,
+    [
+        0, 0, 0,
+        0, 0, 1,
+        0, 0, 2,
+        21,
+        19,
+        13, 0, 0,
+        7,
+        12, 0, 0,
+        37,
+    ],
+    "basic"
+)
+
+string_result := compiler.compile(
+    "\"rocket: \\u{1F680}\"\n"
+)
+
+assert(
+    len(string_result.errors) == 0,
+    "string compile errors"
+)
+assert(
+    len(string_result.chunk.names) == 1,
+    "string table count"
+)
+assert(
+    len(string_result.chunk.names[0]) == 12,
+    "decoded string byte length"
+)
+assert(
+    byte_at(
+        string_result.chunk.names[0],
+        8
+    ) == 240,
+    "decoded unicode byte"
+)
+assert_code(
+    string_result.chunk.code,
+    [4, 0, 0, 37],
+    "string"
+)
+
+function_result := compiler.compile(
+    "f := fn(x) => x + 1\n" +
+    "f(2)\n"
+)
+
+assert(
+    len(function_result.errors) == 0,
+    "function compile errors"
+)
+assert(
+    len(function_result.chunk.functions) == 1,
+    "function table count"
+)
+
+f := function_result.chunk.functions[0]
+assert(f.arity == 1, "function arity")
+assert(len(f.upvalues) == 0, "function upvalues")
+
+assert_code(
+    f.chunk.code,
+    [
+        8, 0, 0,
+        0, 0, 0,
+        19,
+        37,
+    ],
+    "function body"
+)
+
+closure_result := compiler.compile(
+    "make := fn(x) => fn() => x\n" +
+    "make(7)()\n"
+)
+
+assert(
+    len(closure_result.errors) == 0,
+    "closure compile errors"
+)
+
+outer := closure_result.chunk.functions[0]
+assert(
+    len(outer.chunk.functions) == 1,
+    "nested function table"
+)
+
+inner := outer.chunk.functions[0]
+assert(
+    len(inner.upvalues) == 1,
+    "captured upvalue count"
+)
+assert(
+    inner.upvalues[0].is_local,
+    "capture is local"
+)
+assert(
+    inner.upvalues[0].index == 0,
+    "capture slot"
+)
+
+assert_code(
+    inner.chunk.code,
+    [10, 0, 0, 37],
+    "captured body"
+)
+
+conditional := compiler.compile(
+    "if true { 1 } else { 2 }\n"
+)
+
+assert(
+    len(conditional.errors) == 0,
+    "conditional compile errors"
+)
+
+assert_code(
+    conditional.chunk.code,
+    [
+        2,
+        33, 0, 7,
+        7,
+        0, 0, 0,
+        32, 0, 4,
+        7,
+        0, 0, 1,
+        37,
+    ],
+    "conditional"
+)
+
+self_sources := [
+    "../compiler/lexer.lune",
+    "../compiler/parser.lune",
+    "../compiler/compiler.lune",
+]
+
+i := 0
+while i < len(self_sources) {
+    source := read_file(self_sources[i])
+    result := compiler.compile(source)
+
+    assert(
+        len(result.errors) == 0,
+        "compiler source errors: " +
+            self_sources[i]
+    )
+    assert(
+        result.chunk != null,
+        "compiler source chunk: " +
+            self_sources[i]
+    )
+    assert(
+        len(result.chunk.code) > 0,
+        "compiler source bytecode: " +
+            self_sources[i]
+    )
+
+    i = i + 1
+}
+
+print("self-hosted compiler tests passed")

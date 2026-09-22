@@ -43,6 +43,7 @@ test-examples: $(BUILD)/lune-bootstrap
 test-selfhost: $(BUILD)/lune-bootstrap
 	./$(BUILD)/lune-bootstrap run ../compiler/test_lexer.lune
 	./$(BUILD)/lune-bootstrap run ../compiler/test_parser.lune
+	./$(BUILD)/lune-bootstrap run ../compiler/test_compiler.lune
 	@for f in ../tests/syntax/valid/*.lune; do echo "selfhost check $$f"; ./$(BUILD)/lune-bootstrap run ../compiler/check_parser.lune "$$f" || exit 1; done
 	@for f in ../tests/syntax/invalid/*.lune; do echo "selfhost reject $$f"; if ./$(BUILD)/lune-bootstrap run ../compiler/check_parser.lune "$$f" >/dev/null 2>&1; then echo "FAIL: self-host parser accepted $$f"; exit 1; fi; done
 

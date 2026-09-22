@@ -1,0 +1,1596 @@
+parser := import("./parser")
+
+op := {
+    CONSTANT: 0,
+    NULL: 1,
+    TRUE: 2,
+    FALSE: 3,
+    STRING: 4,
+    LIST: 5,
+    MAP: 6,
+    POP: 7,
+
+    GET_LOCAL: 8,
+    SET_LOCAL: 9,
+    GET_UPVALUE: 10,
+    SET_UPVALUE: 11,
+    GET_GLOBAL: 12,
+    DEFINE_GLOBAL: 13,
+    SET_GLOBAL: 14,
+
+    GET_INDEX: 15,
+    SET_INDEX: 16,
+    GET_FIELD: 17,
+    SET_FIELD: 18,
+
+    ADD: 19,
+    SUBTRACT: 20,
+    MULTIPLY: 21,
+    DIVIDE: 22,
+    MODULO: 23,
+    EQUAL: 24,
+    NOT_EQUAL: 25,
+    LESS: 26,
+    LESS_EQUAL: 27,
+    GREATER: 28,
+    GREATER_EQUAL: 29,
+    NOT: 30,
+    NEGATE: 31,
+
+    JUMP: 32,
+    JUMP_IF_FALSE: 33,
+    LOOP: 34,
+
+    CLOSURE: 35,
+    CALL: 36,
+    RETURN: 37,
+}
+
+new_chunk := fn() => ({
+    code: [],
+    spans: [],
+    constants: [],
+    names: [],
+    functions: [],
+})
+
+copy_span := fn(span) => ({
+    start: span.start,
+    length: span.length,
+    line: span.line,
+    column: span.column,
+})
+
+text_at := fn(source, span) =>
+    slice(
+        source,
+        span.start,
+        span.start + span.length
+    )
+
+token_text := fn(source, token) =>
+    text_at(source, token)
+
+diagnostic := fn(compiler, span, message) => {
+    push(compiler.errors, {
+        message: message,
+        start: span.start,
+        length: span.length,
+        line: span.line,
+        column: span.column,
+    })
+    null
+}
+
+new_compiler := fn(source, chunk, enclosing, errors, scope_depth) => ({
+    source: source,
+    chunk: chunk,
+    enclosing: enclosing,
+    errors: errors,
+    scope_depth: scope_depth,
+    locals: [],
+    upvalues: [],
+    declared_globals: [],
+})
+
+emit_byte := fn(compiler, byte, span) => {
+    push(compiler.chunk.code, byte)
+    push(compiler.chunk.spans, copy_span(span))
+    true
+}
+
+emit_u16 := fn(compiler, value, span) => {
+    valid := value >= 0 and value <= 65535
+
+    if not valid {
+        diagnostic(compiler, span, "bytecode operand is out of range")
+        false
+    } else {
+        emit_byte(compiler, int(value / 256), span)
+        emit_byte(compiler, value % 256, span)
+        true
+    }
+}
+
+emit_op := fn(compiler, opcode, span) =>
+    emit_byte(compiler, opcode, span)
+
+emit_indexed := fn(compiler, opcode, index, span) =>
+    if emit_op(compiler, opcode, span) {
+        emit_u16(compiler, index, span)
+    } else {
+        false
+    }
+
+emit_jump := fn(compiler, opcode, span) => {
+    operand := -1
+
+    if emit_op(compiler, opcode, span) {
+        operand = len(compiler.chunk.code)
+
+        if not emit_u16(compiler, 65535, span) {
+            operand = -1
+        }
+    }
+
+    operand
+}
+
+patch_jump := fn(compiler, operand, span) => {
+    if operand < 0 {
+        false
+    } else {
+        distance := len(compiler.chunk.code) - operand - 2
+
+        if distance > 65535 {
+            diagnostic(compiler, span, "jump is too large")
+            false
+        } else {
+            compiler.chunk.code[operand] = int(distance / 256)
+            compiler.chunk.code[operand + 1] = distance % 256
+            true
+        }
+    }
+}
+
+emit_loop := fn(compiler, start, span) => {
+    if not emit_op(compiler, op.LOOP, span) {
+        false
+    } else {
+        distance := len(compiler.chunk.code) + 2 - start
+
+        if distance > 65535 {
+            diagnostic(compiler, span, "loop body is too large")
+            false
+        } else {
+            emit_u16(compiler, distance, span)
+        }
+    }
+}
+
+intern_name := fn(compiler, name, span) => {
+    found := -1
+    i := 0
+
+    while i < len(compiler.chunk.names) and found < 0 {
+        if compiler.chunk.names[i] == name {
+            found = i
+        }
+        i = i + 1
+    }
+
+    if found >= 0 {
+        found
+    } else if len(compiler.chunk.names) >= 65535 {
+        diagnostic(
+            compiler,
+            span,
+            "too many strings/names"
+        )
+        -1
+    } else {
+        index := len(compiler.chunk.names)
+        push(compiler.chunk.names, name)
+        index
+    }
+}
+
+add_constant := fn(compiler, value, span) => {
+    if len(compiler.chunk.constants) >= 65535 {
+        diagnostic(
+            compiler,
+            span,
+            "too many constants"
+        )
+        -1
+    } else {
+        index := len(compiler.chunk.constants)
+        push(compiler.chunk.constants, value)
+        index
+    }
+}
+
+add_function := fn(compiler, function, span) => {
+    if len(compiler.chunk.functions) >= 65535 {
+        diagnostic(
+            compiler,
+            span,
+            "too many functions"
+        )
+        -1
+    } else {
+        index := len(compiler.chunk.functions)
+        push(compiler.chunk.functions, function)
+        index
+    }
+}
+
+resolve_local := fn(compiler, name) => {
+    index := -1
+    i := len(compiler.locals)
+
+    while i > 0 and index < 0 {
+        i = i - 1
+        local := compiler.locals[i]
+
+        if local.active and local.name == name {
+            index = local.slot
+        }
+    }
+
+    index
+}
+
+local_declared_here := fn(compiler, name) => {
+    found := false
+    i := len(compiler.locals)
+
+    while i > 0 and not found {
+        i = i - 1
+        local := compiler.locals[i]
+
+        if (
+            local.active and
+            local.depth == compiler.scope_depth and
+            local.name == name
+        ) {
+            found = true
+        }
+    }
+
+    found
+}
+
+add_local := fn(compiler, name, span) => {
+    if len(compiler.locals) >= 256 {
+        diagnostic(
+            compiler,
+            span,
+            "too many local bindings in function"
+        )
+        -1
+    } else {
+        slot := len(compiler.locals)
+
+        push(compiler.locals, {
+            name: name,
+            depth: compiler.scope_depth,
+            slot: slot,
+            active: true,
+        })
+
+        slot
+    }
+}
+
+begin_scope := fn(compiler) => {
+    compiler.scope_depth =
+        compiler.scope_depth + 1
+    null
+}
+
+end_scope := fn(compiler) => {
+    ending_depth := compiler.scope_depth
+    compiler.scope_depth =
+        compiler.scope_depth - 1
+
+    i := 0
+    while i < len(compiler.locals) {
+        local := compiler.locals[i]
+
+        if (
+            local.active and
+            local.depth == ending_depth
+        ) {
+            local.active = false
+        }
+
+        i = i + 1
+    }
+
+    null
+}
+
+add_upvalue := fn(compiler, index, is_local, span) => {
+    found := -1
+    i := 0
+
+    while i < len(compiler.upvalues) and found < 0 {
+        upvalue := compiler.upvalues[i]
+
+        if (
+            upvalue.index == index and
+            upvalue.is_local == is_local
+        ) {
+            found = i
+        }
+
+        i = i + 1
+    }
+
+    if found >= 0 {
+        found
+    } else if len(compiler.upvalues) >= 256 {
+        diagnostic(
+            compiler,
+            span,
+            "too many captured bindings in function"
+        )
+        -1
+    } else {
+        upvalue_index := len(compiler.upvalues)
+
+        push(compiler.upvalues, {
+            is_local: is_local,
+            index: index,
+        })
+
+        upvalue_index
+    }
+}
+
+resolve_upvalue := null
+
+resolve_upvalue = fn(compiler, name, span) => {
+    if compiler.enclosing == null {
+        -1
+    } else {
+        local := resolve_local(
+            compiler.enclosing,
+            name
+        )
+
+        if local >= 0 {
+            add_upvalue(
+                compiler,
+                local,
+                true,
+                span
+            )
+        } else {
+            outer := resolve_upvalue(
+                compiler.enclosing,
+                name,
+                span
+            )
+
+            if outer >= 0 {
+                add_upvalue(
+                    compiler,
+                    outer,
+                    false,
+                    span
+                )
+            } else {
+                -1
+            }
+        }
+    }
+}
+
+declare_global := fn(compiler, index, span) => {
+    duplicate := false
+    i := 0
+
+    while (
+        i < len(compiler.declared_globals) and
+        not duplicate
+    ) {
+        if compiler.declared_globals[i] == index {
+            duplicate = true
+        }
+        i = i + 1
+    }
+
+    if duplicate {
+        diagnostic(
+            compiler,
+            span,
+            "binding already declared in this scope"
+        )
+        false
+    } else {
+        push(
+            compiler.declared_globals,
+            index
+        )
+        true
+    }
+}
+
+hex_value := fn(c) =>
+    if c >= 48 and c <= 57 {
+        c - 48
+    } else if c >= 97 and c <= 102 {
+        10 + c - 97
+    } else if c >= 65 and c <= 70 {
+        10 + c - 65
+    } else {
+        -1
+    }
+
+append_utf8 := fn(output, codepoint) => {
+    if codepoint <= 127 {
+        push(output, codepoint)
+    } else if codepoint <= 2047 {
+        push(
+            output,
+            192 + int(codepoint / 64)
+        )
+        push(
+            output,
+            128 + codepoint % 64
+        )
+    } else if codepoint <= 65535 {
+        push(
+            output,
+            224 + int(codepoint / 4096)
+        )
+        push(
+            output,
+            128 + int(codepoint / 64) % 64
+        )
+        push(
+            output,
+            128 + codepoint % 64
+        )
+    } else {
+        push(
+            output,
+            240 + int(codepoint / 262144)
+        )
+        push(
+            output,
+            128 + int(codepoint / 4096) % 64
+        )
+        push(
+            output,
+            128 + int(codepoint / 64) % 64
+        )
+        push(
+            output,
+            128 + codepoint % 64
+        )
+    }
+
+    null
+}
+
+decode_string := fn(source, token) => {
+    output := []
+    i := token.start + 1
+    end := token.start + token.length - 1
+
+    while i < end {
+        c := byte_at(source, i)
+        i = i + 1
+
+        if c != 92 {
+            push(output, c)
+        } else {
+            escape := byte_at(source, i)
+            i = i + 1
+
+            if escape == 34 {
+                push(output, 34)
+            } else if escape == 92 {
+                push(output, 92)
+            } else if escape == 110 {
+                push(output, 10)
+            } else if escape == 114 {
+                push(output, 13)
+            } else if escape == 116 {
+                push(output, 9)
+            } else if escape == 48 {
+                push(output, 0)
+            } else if escape == 117 {
+                i = i + 1
+                codepoint := 0
+
+                while byte_at(source, i) != 125 {
+                    codepoint =
+                        codepoint * 16 +
+                        hex_value(
+                            byte_at(source, i)
+                        )
+                    i = i + 1
+                }
+
+                i = i + 1
+                append_utf8(
+                    output,
+                    codepoint
+                )
+            }
+        }
+    }
+
+    bytes(output)
+}
+
+emit_string := fn(compiler, value, span) => {
+    index := intern_name(
+        compiler,
+        value,
+        span
+    )
+
+    if index < 0 {
+        false
+    } else {
+        emit_indexed(
+            compiler,
+            op.STRING,
+            index,
+            span
+        )
+    }
+}
+
+compile_node := null
+
+compile_sequence := fn(compiler, statements, span) => {
+    if len(statements) == 0 {
+        emit_op(
+            compiler,
+            op.NULL,
+            span
+        )
+    } else {
+        ok := true
+        i := 0
+
+        while i < len(statements) and ok {
+            statement := statements[i]
+            ok = compile_node(
+                compiler,
+                statement
+            )
+
+            if (
+                ok and
+                i + 1 < len(statements)
+            ) {
+                ok = emit_op(
+                    compiler,
+                    op.POP,
+                    statement.span
+                )
+            }
+
+            i = i + 1
+        }
+
+        ok
+    }
+}
+
+compile_number := fn(compiler, node) => {
+    value_text := token_text(
+        compiler.source,
+        node.token
+    )
+
+    value := if contains(value_text, ".") {
+        float(value_text)
+    } else {
+        int(value_text)
+    }
+
+    index := add_constant(
+        compiler,
+        value,
+        node.span
+    )
+
+    if index < 0 {
+        false
+    } else {
+        emit_indexed(
+            compiler,
+            op.CONSTANT,
+            index,
+            node.span
+        )
+    }
+}
+
+compile_name := fn(compiler, node) => {
+    name := token_text(
+        compiler.source,
+        node.token
+    )
+
+    local := resolve_local(
+        compiler,
+        name
+    )
+
+    if local >= 0 {
+        emit_indexed(
+            compiler,
+            op.GET_LOCAL,
+            local,
+            node.span
+        )
+    } else {
+        upvalue := resolve_upvalue(
+            compiler,
+            name,
+            node.span
+        )
+
+        if upvalue >= 0 {
+            emit_indexed(
+                compiler,
+                op.GET_UPVALUE,
+                upvalue,
+                node.span
+            )
+        } else {
+            global := intern_name(
+                compiler,
+                name,
+                node.span
+            )
+
+            if global < 0 {
+                false
+            } else {
+                emit_indexed(
+                    compiler,
+                    op.GET_GLOBAL,
+                    global,
+                    node.span
+                )
+            }
+        }
+    }
+}
+
+binary_opcodes := {
+    PLUS: 19,
+    MINUS: 20,
+    STAR: 21,
+    SLASH: 22,
+    PERCENT: 23,
+    EQ: 24,
+    NE: 25,
+    LT: 26,
+    LE: 27,
+    GT: 28,
+    GE: 29,
+}
+
+compile_binary := fn(compiler, node) => {
+    if node.op == "AND" {
+        if not compile_node(
+            compiler,
+            node.left
+        ) {
+            false
+        } else {
+            end := emit_jump(
+                compiler,
+                op.JUMP_IF_FALSE,
+                node.span
+            )
+
+            if end < 0 {
+                false
+            } else if not emit_op(
+                compiler,
+                op.POP,
+                node.span
+            ) {
+                false
+            } else if not compile_node(
+                compiler,
+                node.right
+            ) {
+                false
+            } else {
+                patch_jump(
+                    compiler,
+                    end,
+                    node.span
+                )
+            }
+        }
+    } else if node.op == "OR" {
+        if not compile_node(
+            compiler,
+            node.left
+        ) {
+            false
+        } else {
+            rhs := emit_jump(
+                compiler,
+                op.JUMP_IF_FALSE,
+                node.span
+            )
+            end := emit_jump(
+                compiler,
+                op.JUMP,
+                node.span
+            )
+
+            if rhs < 0 or end < 0 {
+                false
+            } else if not patch_jump(
+                compiler,
+                rhs,
+                node.span
+            ) {
+                false
+            } else if not emit_op(
+                compiler,
+                op.POP,
+                node.span
+            ) {
+                false
+            } else if not compile_node(
+                compiler,
+                node.right
+            ) {
+                false
+            } else {
+                patch_jump(
+                    compiler,
+                    end,
+                    node.span
+                )
+            }
+        }
+    } else if not compile_node(
+        compiler,
+        node.left
+    ) {
+        false
+    } else if not compile_node(
+        compiler,
+        node.right
+    ) {
+        false
+    } else {
+        opcode := binary_opcodes[node.op]
+
+        if opcode == null {
+            diagnostic(
+                compiler,
+                node.span,
+                "unsupported binary operator"
+            )
+            false
+        } else {
+            emit_op(
+                compiler,
+                opcode,
+                node.span
+            )
+        }
+    }
+}
+
+compile_if := fn(compiler, node) => {
+    if not compile_node(
+        compiler,
+        node.condition
+    ) {
+        false
+    } else {
+        else_jump := emit_jump(
+            compiler,
+            op.JUMP_IF_FALSE,
+            node.span
+        )
+
+        if else_jump < 0 {
+            false
+        } else if not emit_op(
+            compiler,
+            op.POP,
+            node.span
+        ) {
+            false
+        } else if not compile_node(
+            compiler,
+            node.then_branch
+        ) {
+            false
+        } else {
+            end_jump := emit_jump(
+                compiler,
+                op.JUMP,
+                node.span
+            )
+
+            if end_jump < 0 {
+                false
+            } else if not patch_jump(
+                compiler,
+                else_jump,
+                node.span
+            ) {
+                false
+            } else if not emit_op(
+                compiler,
+                op.POP,
+                node.span
+            ) {
+                false
+            } else {
+                branch_ok := if node.else_branch == null {
+                    emit_op(
+                        compiler,
+                        op.NULL,
+                        node.span
+                    )
+                } else {
+                    compile_node(
+                        compiler,
+                        node.else_branch
+                    )
+                }
+
+                if not branch_ok {
+                    false
+                } else {
+                    patch_jump(
+                        compiler,
+                        end_jump,
+                        node.span
+                    )
+                }
+            }
+        }
+    }
+}
+
+compile_while := fn(compiler, node) => {
+    loop_start :=
+        len(compiler.chunk.code)
+
+    if not compile_node(
+        compiler,
+        node.condition
+    ) {
+        false
+    } else {
+        exit_jump := emit_jump(
+            compiler,
+            op.JUMP_IF_FALSE,
+            node.span
+        )
+
+        if exit_jump < 0 {
+            false
+        } else if not emit_op(
+            compiler,
+            op.POP,
+            node.span
+        ) {
+            false
+        } else if not compile_node(
+            compiler,
+            node.body
+        ) {
+            false
+        } else if not emit_op(
+            compiler,
+            op.POP,
+            node.span
+        ) {
+            false
+        } else if not emit_loop(
+            compiler,
+            loop_start,
+            node.span
+        ) {
+            false
+        } else if not patch_jump(
+            compiler,
+            exit_jump,
+            node.span
+        ) {
+            false
+        } else if not emit_op(
+            compiler,
+            op.POP,
+            node.span
+        ) {
+            false
+        } else {
+            emit_op(
+                compiler,
+                op.NULL,
+                node.span
+            )
+        }
+    }
+}
+
+compile_declare := fn(compiler, node) => {
+    name := token_text(
+        compiler.source,
+        node.name
+    )
+
+    if compiler.scope_depth > 0 {
+        if local_declared_here(
+            compiler,
+            name
+        ) {
+            diagnostic(
+                compiler,
+                node.name,
+                "binding already declared in this scope"
+            )
+            false
+        } else {
+            slot := add_local(
+                compiler,
+                name,
+                node.name
+            )
+
+            if slot < 0 {
+                false
+            } else if not compile_node(
+                compiler,
+                node.value
+            ) {
+                false
+            } else {
+                emit_indexed(
+                    compiler,
+                    op.SET_LOCAL,
+                    slot,
+                    node.name
+                )
+            }
+        }
+    } else {
+        global := intern_name(
+            compiler,
+            name,
+            node.name
+        )
+
+        if global < 0 {
+            false
+        } else if not declare_global(
+            compiler,
+            global,
+            node.name
+        ) {
+            false
+        } else if not compile_node(
+            compiler,
+            node.value
+        ) {
+            false
+        } else {
+            emit_indexed(
+                compiler,
+                op.DEFINE_GLOBAL,
+                global,
+                node.name
+            )
+        }
+    }
+}
+
+compile_list := fn(compiler, node) => {
+    if len(node.elements) > 65535 {
+        diagnostic(
+            compiler,
+            node.span,
+            "list literal is too large"
+        )
+        false
+    } else {
+        ok := true
+        i := 0
+
+        while i < len(node.elements) and ok {
+            ok = compile_node(
+                compiler,
+                node.elements[i]
+            )
+            i = i + 1
+        }
+
+        if not ok {
+            false
+        } else {
+            emit_indexed(
+                compiler,
+                op.LIST,
+                len(node.elements),
+                node.span
+            )
+        }
+    }
+}
+
+compile_map := fn(compiler, node) => {
+    if len(node.entries) > 65535 {
+        diagnostic(
+            compiler,
+            node.span,
+            "map literal is too large"
+        )
+        false
+    } else {
+        ok := true
+        i := 0
+
+        while i < len(node.entries) and ok {
+            entry := node.entries[i]
+
+            key := if entry.quoted {
+                decode_string(
+                    compiler.source,
+                    entry.key
+                )
+            } else {
+                token_text(
+                    compiler.source,
+                    entry.key
+                )
+            }
+
+            ok = emit_string(
+                compiler,
+                key,
+                entry.key
+            )
+
+            if ok {
+                ok = compile_node(
+                    compiler,
+                    entry.value
+                )
+            }
+
+            i = i + 1
+        }
+
+        if not ok {
+            false
+        } else {
+            emit_indexed(
+                compiler,
+                op.MAP,
+                len(node.entries),
+                node.span
+            )
+        }
+    }
+}
+
+compile_index := fn(compiler, node) =>
+    if not compile_node(
+        compiler,
+        node.object
+    ) {
+        false
+    } else if not compile_node(
+        compiler,
+        node.index
+    ) {
+        false
+    } else {
+        emit_op(
+            compiler,
+            op.GET_INDEX,
+            node.span
+        )
+    }
+
+compile_member := fn(compiler, node) => {
+    if not compile_node(
+        compiler,
+        node.object
+    ) {
+        false
+    } else {
+        name := token_text(
+            compiler.source,
+            node.name
+        )
+
+        index := intern_name(
+            compiler,
+            name,
+            node.name
+        )
+
+        if index < 0 {
+            false
+        } else {
+            emit_indexed(
+                compiler,
+                op.GET_FIELD,
+                index,
+                node.span
+            )
+        }
+    }
+}
+
+compile_assign := fn(compiler, node) => {
+    target := node.target
+
+    if target.kind == "Name" {
+        if not compile_node(
+            compiler,
+            node.value
+        ) {
+            false
+        } else {
+            name := token_text(
+                compiler.source,
+                target.token
+            )
+
+            local := resolve_local(
+                compiler,
+                name
+            )
+
+            if local >= 0 {
+                emit_indexed(
+                    compiler,
+                    op.SET_LOCAL,
+                    local,
+                    target.span
+                )
+            } else {
+                upvalue := resolve_upvalue(
+                    compiler,
+                    name,
+                    target.span
+                )
+
+                if upvalue >= 0 {
+                    emit_indexed(
+                        compiler,
+                        op.SET_UPVALUE,
+                        upvalue,
+                        target.span
+                    )
+                } else {
+                    global := intern_name(
+                        compiler,
+                        name,
+                        target.span
+                    )
+
+                    if global < 0 {
+                        false
+                    } else {
+                        emit_indexed(
+                            compiler,
+                            op.SET_GLOBAL,
+                            global,
+                            target.span
+                        )
+                    }
+                }
+            }
+        }
+    } else if target.kind == "Index" {
+        if not compile_node(
+            compiler,
+            target.object
+        ) {
+            false
+        } else if not compile_node(
+            compiler,
+            target.index
+        ) {
+            false
+        } else if not compile_node(
+            compiler,
+            node.value
+        ) {
+            false
+        } else {
+            emit_op(
+                compiler,
+                op.SET_INDEX,
+                node.span
+            )
+        }
+    } else if target.kind == "Member" {
+        if not compile_node(
+            compiler,
+            target.object
+        ) {
+            false
+        } else if not compile_node(
+            compiler,
+            node.value
+        ) {
+            false
+        } else {
+            name := token_text(
+                compiler.source,
+                target.name
+            )
+
+            index := intern_name(
+                compiler,
+                name,
+                target.name
+            )
+
+            if index < 0 {
+                false
+            } else {
+                emit_indexed(
+                    compiler,
+                    op.SET_FIELD,
+                    index,
+                    node.span
+                )
+            }
+        }
+    } else {
+        diagnostic(
+            compiler,
+            target.span,
+            "invalid assignment target"
+        )
+        false
+    }
+}
+
+compile_function := fn(compiler, node) => {
+    if len(node.parameters) > 256 {
+        diagnostic(
+            compiler,
+            node.span,
+            "function has too many parameters"
+        )
+        false
+    } else {
+        function_chunk := new_chunk()
+
+        child := new_compiler(
+            compiler.source,
+            function_chunk,
+            compiler,
+            compiler.errors,
+            1
+        )
+
+        ok := true
+        i := 0
+
+        while i < len(node.parameters) and ok {
+            parameter := node.parameters[i]
+            name := token_text(
+                compiler.source,
+                parameter
+            )
+
+            if local_declared_here(
+                child,
+                name
+            ) {
+                diagnostic(
+                    child,
+                    parameter,
+                    "duplicate parameter name"
+                )
+                ok = false
+            } else if add_local(
+                child,
+                name,
+                parameter
+            ) < 0 {
+                ok = false
+            }
+
+            i = i + 1
+        }
+
+        if ok {
+            ok = compile_node(
+                child,
+                node.body
+            )
+        }
+
+        if ok {
+            ok = emit_op(
+                child,
+                op.RETURN,
+                node.span
+            )
+        }
+
+        if not ok {
+            false
+        } else {
+            function := {
+                arity: len(node.parameters),
+                upvalues: child.upvalues,
+                chunk: function_chunk,
+            }
+
+            index := add_function(
+                compiler,
+                function,
+                node.span
+            )
+
+            if index < 0 {
+                false
+            } else {
+                emit_indexed(
+                    compiler,
+                    op.CLOSURE,
+                    index,
+                    node.span
+                )
+            }
+        }
+    }
+}
+
+compile_call := fn(compiler, node) => {
+    if len(node.arguments) > 65535 {
+        diagnostic(
+            compiler,
+            node.span,
+            "call has too many arguments"
+        )
+        false
+    } else if not compile_node(
+        compiler,
+        node.callee
+    ) {
+        false
+    } else {
+        ok := true
+        i := 0
+
+        while i < len(node.arguments) and ok {
+            ok = compile_node(
+                compiler,
+                node.arguments[i]
+            )
+            i = i + 1
+        }
+
+        if not ok {
+            false
+        } else {
+            emit_indexed(
+                compiler,
+                op.CALL,
+                len(node.arguments),
+                node.span
+            )
+        }
+    }
+}
+
+compile_node = fn(compiler, node) => {
+    kind := node.kind
+
+    if kind == "Program" {
+        compile_sequence(
+            compiler,
+            node.statements,
+            node.span
+        )
+    } else if kind == "Block" {
+        begin_scope(compiler)
+
+        ok := compile_sequence(
+            compiler,
+            node.statements,
+            node.span
+        )
+
+        end_scope(compiler)
+        ok
+    } else if kind == "Null" {
+        emit_op(
+            compiler,
+            op.NULL,
+            node.span
+        )
+    } else if kind == "Bool" {
+        emit_op(
+            compiler,
+            if node.value {
+                op.TRUE
+            } else {
+                op.FALSE
+            },
+            node.span
+        )
+    } else if kind == "Number" {
+        compile_number(
+            compiler,
+            node
+        )
+    } else if kind == "String" {
+        emit_string(
+            compiler,
+            decode_string(
+                compiler.source,
+                node.token
+            ),
+            node.span
+        )
+    } else if kind == "Name" {
+        compile_name(
+            compiler,
+            node
+        )
+    } else if kind == "Unary" {
+        if not compile_node(
+            compiler,
+            node.operand
+        ) {
+            false
+        } else if node.op == "MINUS" {
+            emit_op(
+                compiler,
+                op.NEGATE,
+                node.span
+            )
+        } else if node.op == "NOT" {
+            emit_op(
+                compiler,
+                op.NOT,
+                node.span
+            )
+        } else {
+            diagnostic(
+                compiler,
+                node.span,
+                "unsupported unary operator"
+            )
+            false
+        }
+    } else if kind == "Binary" {
+        compile_binary(
+            compiler,
+            node
+        )
+    } else if kind == "If" {
+        compile_if(
+            compiler,
+            node
+        )
+    } else if kind == "While" {
+        compile_while(
+            compiler,
+            node
+        )
+    } else if kind == "Declare" {
+        compile_declare(
+            compiler,
+            node
+        )
+    } else if kind == "Assign" {
+        compile_assign(
+            compiler,
+            node
+        )
+    } else if kind == "List" {
+        compile_list(
+            compiler,
+            node
+        )
+    } else if kind == "Map" {
+        compile_map(
+            compiler,
+            node
+        )
+    } else if kind == "Index" {
+        compile_index(
+            compiler,
+            node
+        )
+    } else if kind == "Member" {
+        compile_member(
+            compiler,
+            node
+        )
+    } else if kind == "Function" {
+        compile_function(
+            compiler,
+            node
+        )
+    } else if kind == "Call" {
+        compile_call(
+            compiler,
+            node
+        )
+    } else {
+        diagnostic(
+            compiler,
+            node.span,
+            "unsupported AST node"
+        )
+        false
+    }
+}
+
+compile := fn(source) => {
+    parsed := parser.parse(source)
+    errors := parsed.errors
+
+    if len(errors) > 0 {
+        {
+            chunk: null,
+            errors: errors,
+        }
+    } else {
+        chunk := new_chunk()
+
+        compiler := new_compiler(
+            source,
+            chunk,
+            null,
+            errors,
+            0
+        )
+
+        ok := compile_node(
+            compiler,
+            parsed.ast
+        )
+
+        if ok {
+            ok = emit_op(
+                compiler,
+                op.RETURN,
+                parsed.ast.span
+            )
+        }
+
+        {
+            chunk: if ok {
+                chunk
+            } else {
+                null
+            },
+            errors: errors,
+        }
+    }
+}
+
+{
+    compile: compile,
+    opcodes: op,
+}
