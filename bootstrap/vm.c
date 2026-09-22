@@ -32,6 +32,10 @@ struct LuneVM {
     LuneValue stack[STACK_MAX];
     size_t stack_count;
 
+    LuneValue *native_roots;
+    size_t native_root_count;
+    size_t native_root_capacity;
+
     CallFrame frames[FRAME_MAX];
     size_t frame_count;
 
@@ -94,6 +98,17 @@ static void mark_vm_roots(
     ) {
         lune_heap_mark_value(
             heap, vm->stack[i]
+        );
+    }
+
+    for (
+        size_t i = 0;
+        i < vm->native_root_count;
+        i++
+    ) {
+        lune_heap_mark_value(
+            heap,
+            vm->native_roots[i]
         );
     }
 
@@ -182,6 +197,70 @@ static bool push(
     vm->stack[vm->stack_count++] =
         value;
     return true;
+}
+
+static bool native_root_push(
+    LuneVM *vm,
+    LuneValue value
+) {
+    if (
+        vm->native_root_count ==
+        vm->native_root_capacity
+    ) {
+        size_t next =
+            vm->native_root_capacity == 0
+            ? 16
+            : vm->native_root_capacity * 2;
+
+        if (
+            next <
+                vm->native_root_capacity ||
+            next >
+                SIZE_MAX /
+                sizeof(*vm->native_roots)
+        ) {
+            return native_error(
+                vm,
+                "native root set is too large"
+            );
+        }
+
+        LuneValue *grown =
+            realloc(
+                vm->native_roots,
+                next *
+                    sizeof(*vm->native_roots)
+            );
+
+        if (grown == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+
+        vm->native_roots = grown;
+        vm->native_root_capacity =
+            next;
+    }
+
+    vm->native_roots[
+        vm->native_root_count++
+    ] = value;
+
+    return true;
+}
+
+static void native_roots_restore(
+    LuneVM *vm,
+    size_t count
+) {
+    if (
+        count <=
+        vm->native_root_count
+    ) {
+        vm->native_root_count =
+            count;
+    }
 }
 
 static bool pop(
@@ -3801,6 +3880,7 @@ void lune_vm_free(
         &vm->heap
     );
 
+    free(vm->native_roots);
     free(vm);
 }
 
@@ -3865,6 +3945,7 @@ static bool prepare_run(
      * previous run's heap.
      */
     vm->stack_count = 0;
+    vm->native_root_count = 0;
     vm->frame_count = 0;
     vm->globals = NULL;
     vm->open_upvalues = NULL;
