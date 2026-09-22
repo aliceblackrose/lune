@@ -318,10 +318,10 @@ Keep native APIs primitive. Implement higher-level behavior in Lune when practic
 
 ### Collections and strings
 
-- [ ] list iteration
-- [ ] `map`
-- [ ] `filter`
-- [ ] `reduce`
+- [x] list iteration (`each`)
+- [x] `map`
+- [x] `filter`
+- [x] `reduce`
 - [x] string splitting/joining (`split`, `join`)
 - [x] searching (`find`, `contains`)
 - [x] basic formatting (`format`)

@@ -326,6 +326,15 @@ The bootstrap scripting runtime currently provides a small set of globals. These
 
 Conversion failures and invalid argument types are runtime errors.
 
+Collection helpers:
+
+- `each(items, fn)` calls `fn(item)` for each list element in order and returns the original list.
+- `map(items, fn)` returns a new list containing `fn(item)` for each element.
+- `filter(items, fn)` returns a new list containing elements whose callback result is truthy.
+- `reduce(items, initial, fn)` evaluates `fn(accumulator, item)` from left to right and returns the final accumulator.
+
+Callbacks may be Lune closures or native functions. Callback arity and runtime errors use the same call semantics as ordinary Lune calls.
+
 String helpers:
 
 - `contains(text, needle)` tests whether a byte substring is present.
