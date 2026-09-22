@@ -1,18 +1,18 @@
 lexer := import("./lexer")
 
-token_span := fn(token) => {
+token_span := fn(token) => ({
     start: token.start,
     length: token.length,
     line: token.line,
     column: token.column,
-}
+})
 
-merge_span := fn(left, right) => {
+merge_span := fn(left, right) => ({
     start: left.start,
     length: right.start + right.length - left.start,
     line: left.line,
     column: left.column,
-}
+})
 
 infix_bp := fn(kind) =>
     if kind == "OR" {
