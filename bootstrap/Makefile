@@ -38,7 +38,7 @@ test-syntax: $(BUILD)/lune-bootstrap
 	@for f in ../tests/syntax/invalid/*.lune; do echo "reject $$f"; if ./$(BUILD)/lune-bootstrap check "$$f" >/dev/null 2>&1; then echo "FAIL: expected $$f to fail"; exit 1; fi; done
 
 test-examples: $(BUILD)/lune-bootstrap
-	@for f in ../examples/*.lune; do echo "run $f"; ./$(BUILD)/lune-bootstrap run "$f" || exit 1; done
+	@for f in ../examples/*.lune; do echo "run $$f"; ./$(BUILD)/lune-bootstrap run "$$f" || exit 1; done
 
 test-selfhost: $(BUILD)/lune-bootstrap
 	./$(BUILD)/lune-bootstrap run ../compiler/test_lexer.lune
