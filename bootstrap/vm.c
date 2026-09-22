@@ -1,6 +1,8 @@
 #include "vm.h"
 
+#include "compiler.h"
 #include "object.h"
+#include "parser.h"
 #include "platform.h"
 
 #include <errno.h>
@@ -21,10 +23,18 @@ typedef struct {
     size_t stack_base;
 
     LuneObjClosure *closure;
+    const char *module_path;
 
     LuneValue locals[LOCAL_MAX];
     bool local_defined[LOCAL_MAX];
 } CallFrame;
+
+typedef struct {
+    char *key;
+    bool loading;
+    LuneValue value;
+    LuneChunk *chunk;
+} ModuleEntry;
 
 struct LuneVM {
     LuneHeap heap;
@@ -47,6 +57,11 @@ struct LuneVM {
 
     int process_argc;
     const char *const *process_argv;
+    const char *script_path;
+
+    ModuleEntry *modules;
+    size_t module_count;
+    size_t module_capacity;
 
     bool exit_requested;
     int exit_status;
@@ -122,6 +137,19 @@ static void mark_vm_roots(
             heap,
             (LuneObj *)vm->globals
         );
+    }
+
+    for (
+        size_t i = 0;
+        i < vm->module_count;
+        i++
+    ) {
+        if (!vm->modules[i].loading) {
+            lune_heap_mark_value(
+                heap,
+                vm->modules[i].value
+            );
+        }
     }
 
     for (
@@ -1233,6 +1261,342 @@ static void close_frame_upvalues(
                 &upvalue->next_open;
         }
     }
+}
+
+static void module_entries_clear(
+    LuneVM *vm
+) {
+    for (
+        size_t i = 0;
+        i < vm->module_count;
+        i++
+    ) {
+        free(vm->modules[i].key);
+
+        if (
+            vm->modules[i].chunk !=
+            NULL
+        ) {
+            lune_chunk_free(
+                vm->modules[i].chunk
+            );
+            free(
+                vm->modules[i].chunk
+            );
+        }
+    }
+
+    free(vm->modules);
+    vm->modules = NULL;
+    vm->module_count = 0;
+    vm->module_capacity = 0;
+}
+
+static ModuleEntry *module_find(
+    LuneVM *vm,
+    const char *key
+) {
+    for (
+        size_t i = 0;
+        i < vm->module_count;
+        i++
+    ) {
+        if (
+            strcmp(
+                vm->modules[i].key,
+                key
+            ) == 0
+        ) {
+            return &vm->modules[i];
+        }
+    }
+
+    return NULL;
+}
+
+static ModuleEntry *module_add(
+    LuneVM *vm,
+    char *owned_key
+) {
+    if (
+        vm->module_count ==
+        vm->module_capacity
+    ) {
+        size_t next =
+            vm->module_capacity == 0
+            ? 8
+            : vm->module_capacity * 2;
+
+        if (
+            next <
+                vm->module_capacity ||
+            next >
+                SIZE_MAX /
+                    sizeof(*vm->modules)
+        ) {
+            free(owned_key);
+            return NULL;
+        }
+
+        ModuleEntry *grown =
+            realloc(
+                vm->modules,
+                next *
+                    sizeof(*vm->modules)
+            );
+
+        if (grown == NULL) {
+            free(owned_key);
+            return NULL;
+        }
+
+        vm->modules = grown;
+        vm->module_capacity = next;
+    }
+
+    ModuleEntry *entry =
+        &vm->modules[
+            vm->module_count++
+        ];
+
+    *entry = (ModuleEntry){
+        .key = owned_key,
+        .loading = true,
+        .value = lune_value_null(),
+    };
+
+    return entry;
+}
+
+static char *copy_chars(
+    const char *chars,
+    size_t length
+) {
+    if (length == SIZE_MAX) {
+        return NULL;
+    }
+
+    char *copy =
+        malloc(length + 1);
+
+    if (copy == NULL) {
+        return NULL;
+    }
+
+    memcpy(
+        copy,
+        chars,
+        length
+    );
+
+    copy[length] = '\0';
+    return copy;
+}
+
+static bool string_ends_with_chars(
+    const char *value,
+    const char *suffix
+) {
+    size_t value_length =
+        strlen(value);
+    size_t suffix_length =
+        strlen(suffix);
+
+    return
+        value_length >= suffix_length &&
+        memcmp(
+            value +
+                value_length -
+                suffix_length,
+            suffix,
+            suffix_length
+        ) == 0;
+}
+
+static char *module_base_directory(
+    const char *path
+) {
+    if (
+        path == NULL ||
+        path[0] == '\0'
+    ) {
+        return copy_chars(".", 1);
+    }
+
+    const char *slash =
+        strrchr(path, '/');
+
+    if (slash == NULL) {
+        return copy_chars(".", 1);
+    }
+
+    if (slash == path) {
+        return copy_chars("/", 1);
+    }
+
+    return copy_chars(
+        path,
+        (size_t)(slash - path)
+    );
+}
+
+static bool module_file_key(
+    LuneVM *vm,
+    const LuneObjString *specifier,
+    char **key
+) {
+    if (
+        strlen(specifier->chars) !=
+        specifier->length
+    ) {
+        return native_error(
+            vm,
+            "import path contains NUL"
+        );
+    }
+
+    const char *current =
+        vm->script_path;
+
+    CallFrame *frame =
+        current_frame(vm);
+
+    if (
+        frame != NULL &&
+        frame->module_path != NULL
+    ) {
+        current =
+            frame->module_path;
+    }
+
+    char *base =
+        module_base_directory(
+            current
+        );
+
+    if (base == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    bool absolute =
+        specifier->length > 0 &&
+        specifier->chars[0] == '/';
+
+    size_t base_length =
+        strlen(base);
+
+    size_t extension =
+        (
+            specifier->length >= 5 &&
+            memcmp(
+                specifier->chars +
+                    specifier->length - 5,
+                ".lune",
+                5
+            ) == 0
+        )
+        ? 0
+        : 5;
+
+    size_t separator =
+        absolute ||
+        base_length == 0 ||
+        base[
+            base_length - 1
+        ] == '/'
+        ? 0
+        : 1;
+
+    size_t joined_length =
+        (
+            absolute
+            ? 0
+            : base_length +
+                separator
+        ) +
+        specifier->length +
+        extension;
+
+    if (
+        joined_length <
+        specifier->length
+    ) {
+        free(base);
+        return native_error(
+            vm,
+            "import path is too large"
+        );
+    }
+
+    char *joined =
+        malloc(
+            joined_length + 1
+        );
+
+    if (joined == NULL) {
+        free(base);
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    size_t offset = 0;
+
+    if (!absolute) {
+        memcpy(
+            joined,
+            base,
+            base_length
+        );
+
+        offset = base_length;
+
+        if (separator != 0) {
+            joined[offset++] = '/';
+        }
+    }
+
+    memcpy(
+        joined + offset,
+        specifier->chars,
+        specifier->length
+    );
+
+    offset += specifier->length;
+
+    if (extension != 0) {
+        memcpy(
+            joined + offset,
+            ".lune",
+            5
+        );
+
+        offset += 5;
+    }
+
+    joined[offset] = '\0';
+    free(base);
+
+    char error[256];
+    char *canonical = NULL;
+
+    if (!lune_platform_canonical_path(
+        joined,
+        &canonical,
+        error,
+        sizeof(error)
+    )) {
+        free(joined);
+        return native_error(
+            vm, error
+        );
+    }
+
+    free(joined);
+    *key = canonical;
+    return true;
 }
 
 static bool native_error(
@@ -4497,6 +4861,451 @@ static bool native_json_stringify(
     return ok;
 }
 
+static bool module_compile_wrapper(
+    LuneVM *vm,
+    ModuleEntry *entry,
+    const char *source,
+    size_t source_length
+) {
+    static const char prefix[] =
+        "fn() => {\n";
+    static const char suffix[] =
+        "\n}\n";
+
+    if (
+        source_length >
+        SIZE_MAX -
+            (sizeof(prefix) - 1) -
+            (sizeof(suffix) - 1) -
+            1
+    ) {
+        return native_error(
+            vm,
+            "module source is too large"
+        );
+    }
+
+    size_t wrapped_length =
+        (sizeof(prefix) - 1) +
+        source_length +
+        (sizeof(suffix) - 1);
+
+    char *wrapped =
+        malloc(
+            wrapped_length + 1
+        );
+
+    if (wrapped == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    size_t offset = 0;
+
+    memcpy(
+        wrapped + offset,
+        prefix,
+        sizeof(prefix) - 1
+    );
+
+    offset += sizeof(prefix) - 1;
+
+    memcpy(
+        wrapped + offset,
+        source,
+        source_length
+    );
+
+    offset += source_length;
+
+    memcpy(
+        wrapped + offset,
+        suffix,
+        sizeof(suffix) - 1
+    );
+
+    offset += sizeof(suffix) - 1;
+    wrapped[offset] = '\0';
+
+    LuneParser parser;
+    lune_parser_init(
+        &parser,
+        wrapped,
+        wrapped_length,
+        vm->diagnostic,
+        vm->diagnostic_context
+    );
+
+    LuneAst *ast =
+        lune_parse_program(
+            &parser
+        );
+
+    if (
+        ast == NULL ||
+        parser.had_error
+    ) {
+        lune_ast_free(ast);
+        free(wrapped);
+        return false;
+    }
+
+    LuneChunk *chunk =
+        malloc(sizeof(*chunk));
+
+    if (chunk == NULL) {
+        lune_ast_free(ast);
+        free(wrapped);
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    lune_chunk_init(chunk);
+
+    bool compiled = lune_compile(
+        ast,
+        wrapped,
+        chunk,
+        vm->diagnostic,
+        vm->diagnostic_context
+    );
+
+    lune_ast_free(ast);
+    free(wrapped);
+
+    if (!compiled) {
+        lune_chunk_free(chunk);
+        free(chunk);
+        return false;
+    }
+
+    entry->chunk = chunk;
+    return true;
+}
+
+static bool module_execute_entry(
+    LuneVM *vm,
+    ModuleEntry *entry,
+    LuneValue *result
+) {
+    size_t base_depth =
+        vm->frame_count;
+    size_t base_stack =
+        vm->stack_count;
+
+    if (
+        vm->frame_count >=
+        FRAME_MAX
+    ) {
+        return native_error(
+            vm,
+            "maximum module depth exceeded"
+        );
+    }
+
+    CallFrame *frame =
+        &vm->frames[
+            vm->frame_count++
+        ];
+
+    *frame = (CallFrame){
+        .chunk = entry->chunk,
+        .stack_base = base_stack,
+        .closure = NULL,
+        .module_path = entry->key,
+    };
+
+    LuneValue factory =
+        lune_value_null();
+
+    if (!run_until(
+        vm,
+        &factory,
+        base_depth
+    )) {
+        return false;
+    }
+
+    if (vm->exit_requested) {
+        *result = lune_value_null();
+        return true;
+    }
+
+    if (!invoke_callable(
+        vm,
+        factory,
+        0,
+        NULL,
+        result
+    )) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool module_native_json(
+    LuneVM *vm,
+    ModuleEntry *entry,
+    LuneValue *result
+) {
+    size_t roots =
+        vm->native_root_count;
+
+    LuneObjMap *module =
+        lune_map_new(
+            &vm->heap
+        );
+
+    if (module == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    if (!native_root_push(
+        vm,
+        lune_value_obj(
+            (LuneObj *)module
+        )
+    )) {
+        return false;
+    }
+
+    LuneValue parse;
+    LuneValue stringify;
+
+    if (
+        !lune_map_get_chars(
+            vm->globals,
+            "json_parse",
+            strlen("json_parse"),
+            &parse
+        ) ||
+        !lune_map_get_chars(
+            vm->globals,
+            "json_stringify",
+            strlen("json_stringify"),
+            &stringify
+        ) ||
+        !lune_map_set_chars(
+            &vm->heap,
+            module,
+            "parse",
+            strlen("parse"),
+            parse
+        ) ||
+        !lune_map_set_chars(
+            &vm->heap,
+            module,
+            "stringify",
+            strlen("stringify"),
+            stringify
+        )
+    ) {
+        native_roots_restore(
+            vm, roots
+        );
+
+        return native_error(
+            vm,
+            "unable to initialize json module"
+        );
+    }
+
+    *result = lune_value_obj(
+        (LuneObj *)module
+    );
+
+    entry->loading = false;
+    entry->value = *result;
+
+    native_roots_restore(
+        vm, roots
+    );
+
+    return true;
+}
+
+static bool native_import(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *specifier =
+        as_string(args[0]);
+
+    if (specifier == NULL) {
+        return native_error(
+            vm,
+            "import() expects a string"
+        );
+    }
+
+    bool file_module =
+        specifier->length > 0 &&
+        (
+            specifier->chars[0] == '.' ||
+            specifier->chars[0] == '/' ||
+            memchr(
+                specifier->chars,
+                '/',
+                specifier->length
+            ) != NULL
+        );
+
+    if (!file_module) {
+        if (
+            specifier->length !=
+                strlen("json") ||
+            memcmp(
+                specifier->chars,
+                "json",
+                strlen("json")
+            ) != 0
+        ) {
+            return native_error(
+                vm,
+                "unknown native module"
+            );
+        }
+
+        ModuleEntry *cached =
+            module_find(vm, "json");
+
+        if (cached != NULL) {
+            if (cached->loading) {
+                return native_error(
+                    vm,
+                    "cyclic native module import"
+                );
+            }
+
+            *result = cached->value;
+            return true;
+        }
+
+        char *key =
+            copy_chars(
+                "json",
+                strlen("json")
+            );
+
+        if (key == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+
+        ModuleEntry *entry =
+            module_add(vm, key);
+
+        if (entry == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+
+        return module_native_json(
+            vm,
+            entry,
+            result
+        );
+    }
+
+    char *key = NULL;
+
+    if (!module_file_key(
+        vm,
+        specifier,
+        &key
+    )) {
+        return false;
+    }
+
+    ModuleEntry *cached =
+        module_find(vm, key);
+
+    if (cached != NULL) {
+        free(key);
+
+        if (cached->loading) {
+            return native_error(
+                vm,
+                "cyclic module import"
+            );
+        }
+
+        *result = cached->value;
+        return true;
+    }
+
+    ModuleEntry *entry =
+        module_add(vm, key);
+
+    if (entry == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    char *source = NULL;
+    size_t source_length = 0;
+    char error[256];
+
+    if (!lune_platform_read_file(
+        entry->key,
+        &source,
+        &source_length,
+        error,
+        sizeof(error)
+    )) {
+        return native_error(
+            vm, error
+        );
+    }
+
+    bool compiled =
+        module_compile_wrapper(
+            vm,
+            entry,
+            source,
+            source_length
+        );
+
+    free(source);
+
+    if (!compiled) {
+        return false;
+    }
+
+    LuneValue value =
+        lune_value_null();
+
+    if (!module_execute_entry(
+        vm,
+        entry,
+        &value
+    )) {
+        return false;
+    }
+
+    if (vm->exit_requested) {
+        *result = lune_value_null();
+        return true;
+    }
+
+    entry->value = value;
+    entry->loading = false;
+    *result = value;
+    return true;
+}
+
 static bool native_env(
     LuneVM *vm,
     int argc,
@@ -5409,6 +6218,8 @@ static bool call_closure(
             callee_index,
         .closure =
             closure,
+        .module_path =
+            closure->module_path,
     };
 
     for (
@@ -5694,6 +6505,7 @@ void lune_vm_free(
         &vm->heap
     );
 
+    module_entries_clear(vm);
     free(vm->native_roots);
     free(vm);
 }
@@ -5705,6 +6517,13 @@ void lune_vm_set_process_args(
 ) {
     vm->process_argc = argc;
     vm->process_argv = argv;
+}
+
+void lune_vm_set_script_path(
+    LuneVM *vm,
+    const char *path
+) {
+    vm->script_path = path;
 }
 
 bool lune_vm_exit_status(
@@ -5774,6 +6593,8 @@ static bool prepare_run(
     lune_heap_free(
         &vm->heap
     );
+
+    module_entries_clear(vm);
 
     lune_heap_init(
         &vm->heap,
@@ -5865,6 +6686,10 @@ static bool prepare_run(
             native_json_stringify
         ) ||
         !define_native(
+            vm, "import", 1,
+            native_import
+        ) ||
+        !define_native(
             vm, "env", 1, native_env
         ) ||
         !define_native(
@@ -5908,6 +6733,10 @@ static bool prepare_run(
         .ip = 0,
         .stack_base = 0,
         .closure = NULL,
+        .module_path =
+            vm->script_path != NULL
+            ? vm->script_path
+            : ".",
     };
 
     return true;
@@ -6822,6 +7651,9 @@ static bool run_until(
                         "out of memory"
                     );
                 }
+
+                closure->module_path =
+                    frame->module_path;
 
                 /*
                  * Root the closure before capture_upvalue()

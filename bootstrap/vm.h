@@ -34,6 +34,10 @@ void lune_vm_set_process_args(
     int argc,
     const char *const *argv
 );
+void lune_vm_set_script_path(
+    LuneVM *vm,
+    const char *path
+);
 bool lune_vm_exit_status(
     const LuneVM *vm,
     int *status

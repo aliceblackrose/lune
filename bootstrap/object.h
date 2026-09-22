@@ -68,6 +68,7 @@ typedef struct {
     const LuneFunction *function;
     LuneObjUpvalue **upvalues;
     size_t upvalue_count;
+    const char *module_path;
 } LuneObjClosure;
 
 struct LuneObjUpvalue {

@@ -101,6 +101,9 @@ static EvalResult eval_with_args(
                 process_argc,
                 process_argv
             );
+            lune_vm_set_script_path(
+                vm, "."
+            );
             lune_vm_set_gc_stress(
                 vm, true
             );
@@ -927,6 +930,88 @@ int main(void) {
     expect_error(
         "json-function",
         "json_stringify(fn() => null)\n"
+    );
+
+    expect_int(
+        "native-module",
+        "json := import(\"json\")\n"
+        "json.parse(\"{\\\"x\\\":7}\").x\n",
+        7
+    );
+
+    expect_int(
+        "file-module",
+        "write_file("
+        "\"build/lune-module-value.lune\", "
+        "\"{value: 42}\\n\""
+        ")\n"
+        "m := import("
+        "\"./build/lune-module-value\""
+        ")\n"
+        "m.value\n",
+        42
+    );
+
+    expect_bool(
+        "module-cache",
+        "write_file("
+        "\"build/lune-module-cache.lune\", "
+        "\"{items: []}\\n\""
+        ")\n"
+        "a := import("
+        "\"./build/lune-module-cache\""
+        ")\n"
+        "b := import("
+        "\"./build/lune-module-cache.lune\""
+        ")\n"
+        "a == b\n",
+        true
+    );
+
+    expect_int(
+        "module-closure",
+        "write_file("
+        "\"build/lune-module-fn.lune\", "
+        "\"factor := 3\\n"
+        "fn(x) => x * factor\\n\""
+        ")\n"
+        "f := import("
+        "\"./build/lune-module-fn\""
+        ")\n"
+        "f(4)\n",
+        12
+    );
+
+    expect_int(
+        "nested-relative-module",
+        "write_file("
+        "\"build/lune-child.lune\", "
+        "\"{value: 8}\\n\""
+        ")\n"
+        "write_file("
+        "\"build/lune-parent.lune\", "
+        "\"child := import(\\\"./lune-child\\\")\\n"
+        "{value: child.value + 1}\\n\""
+        ")\n"
+        "import("
+        "\"./build/lune-parent\""
+        ").value\n",
+        9
+    );
+
+    expect_error(
+        "cyclic-module",
+        "write_file("
+        "\"build/lune-cycle-a.lune\", "
+        "\"import(\\\"./lune-cycle-b\\\")\\n\""
+        ")\n"
+        "write_file("
+        "\"build/lune-cycle-b.lune\", "
+        "\"import(\\\"./lune-cycle-a\\\")\\n\""
+        ")\n"
+        "import("
+        "\"./build/lune-cycle-a\""
+        ")\n"
     );
 
     expect_string(

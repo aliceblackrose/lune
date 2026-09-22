@@ -28,6 +28,13 @@ bool lune_platform_write_file(
     size_t error_capacity
 );
 
+bool lune_platform_canonical_path(
+    const char *path,
+    char **canonical,
+    char *error,
+    size_t error_capacity
+);
+
 bool lune_platform_exec(
     const char *program,
     char *const argv[],

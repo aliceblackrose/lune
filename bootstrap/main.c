@@ -161,6 +161,9 @@ static int execute_file(
                 process_argc,
                 process_argv
             );
+            lune_vm_set_script_path(
+                vm, path
+            );
             ok = lune_vm_run(
                 vm, &chunk, &result
             );

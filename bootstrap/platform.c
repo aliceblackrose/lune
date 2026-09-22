@@ -212,6 +212,56 @@ bool lune_platform_write_file(
     return true;
 }
 
+bool lune_platform_canonical_path(
+    const char *path,
+    char **canonical,
+    char *error,
+    size_t error_capacity
+) {
+#if defined(_WIN32)
+    size_t length = strlen(path);
+
+    char *copy = malloc(
+        length + 1
+    );
+
+    if (copy == NULL) {
+        set_error(
+            error,
+            error_capacity,
+            "out of memory resolving path"
+        );
+        return false;
+    }
+
+    memcpy(
+        copy,
+        path,
+        length + 1
+    );
+
+    *canonical = copy;
+    return true;
+#else
+    char *resolved =
+        realpath(path, NULL);
+
+    if (resolved == NULL) {
+        set_error(
+            error,
+            error_capacity,
+            "unable to resolve %s: %s",
+            path,
+            strerror(errno)
+        );
+        return false;
+    }
+
+    *canonical = resolved;
+    return true;
+#endif
+}
+
 #if !defined(_WIN32)
 
 static bool read_capture(
