@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -378,18 +379,21 @@ bool lune_platform_exec(
                 (size_t)written;
 
             if (
-                count >
+                count >=
                 sizeof(message)
             ) {
                 count =
-                    sizeof(message);
+                    sizeof(message) - 1;
             }
 
-            (void)write(
-                STDERR_FILENO,
-                message,
-                count
-            );
+            ssize_t write_result =
+                write(
+                    STDERR_FILENO,
+                    message,
+                    count
+                );
+
+            (void)write_result;
         }
 
         _exit(127);
