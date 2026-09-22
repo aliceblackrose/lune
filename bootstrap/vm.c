@@ -56,6 +56,11 @@ struct LuneVM {
     void *diagnostic_context;
 };
 
+static bool native_error(
+    LuneVM *vm,
+    const char *message
+);
+
 static bool run_until(
     LuneVM *vm,
     LuneValue *result,
