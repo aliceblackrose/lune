@@ -869,6 +869,66 @@ int main(void) {
         "map([1], fn(a, b) => a)\n"
     );
 
+    expect_int(
+        "json-parse",
+        "v := json_parse("
+        "\"{\\\"name\\\":\\\"Alice\\\","
+        "\\\"nums\\\":[1,2,3],"
+        "\\\"ok\\\":true}\""
+        ")\n"
+        "v.nums[2]\n",
+        3
+    );
+
+    expect_bool(
+        "json-parse-values",
+        "v := json_parse("
+        "\"{\\\"n\\\":null,"
+        "\\\"f\\\":1.5,"
+        "\\\"b\\\":false}\""
+        ")\n"
+        "v.n == null and "
+        "v.f == 1.5 and "
+        "not v.b\n",
+        true
+    );
+
+    expect_string(
+        "json-stringify",
+        "json_stringify("
+        "{a: 1, b: [true, null, \"x\"]}"
+        ")\n",
+        "{\"a\":1,\"b\":[true,null,\"x\"]}",
+        29
+    );
+
+    expect_int(
+        "json-roundtrip",
+        "json_parse("
+        "json_stringify("
+        "{items: [4, 5, 6]}"
+        ")"
+        ").items[1]\n",
+        5
+    );
+
+    expect_error(
+        "json-invalid",
+        "json_parse(\"{\")\n"
+    );
+
+    expect_error(
+        "json-cycle",
+        "m := {}\n"
+        "m.self = m\n"
+        "json_stringify(m)\n"
+    );
+
+    expect_error(
+        "json-function",
+        "json_stringify(fn() => null)\n"
+    );
+
     expect_string(
         "path-join",
         "path_join(\"alpha\", \"beta\")\n",

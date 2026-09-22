@@ -2688,6 +2688,1815 @@ static bool native_reduce(
     return true;
 }
 
+
+typedef struct {
+    char *data;
+    size_t count;
+    size_t capacity;
+} ByteBuffer;
+
+static void byte_buffer_free(
+    ByteBuffer *buffer
+) {
+    free(buffer->data);
+    *buffer = (ByteBuffer){0};
+}
+
+static bool byte_buffer_reserve(
+    ByteBuffer *buffer,
+    size_t extra
+) {
+    if (
+        extra >
+        SIZE_MAX - buffer->count
+    ) {
+        return false;
+    }
+
+    size_t needed =
+        buffer->count + extra;
+
+    if (
+        needed <=
+        buffer->capacity
+    ) {
+        return true;
+    }
+
+    size_t next =
+        buffer->capacity == 0
+        ? 64
+        : buffer->capacity;
+
+    while (next < needed) {
+        if (next > SIZE_MAX / 2) {
+            next = needed;
+            break;
+        }
+
+        next *= 2;
+    }
+
+    char *grown = realloc(
+        buffer->data,
+        next
+    );
+
+    if (grown == NULL) {
+        return false;
+    }
+
+    buffer->data = grown;
+    buffer->capacity = next;
+    return true;
+}
+
+static bool byte_buffer_append(
+    ByteBuffer *buffer,
+    const char *data,
+    size_t length
+) {
+    if (!byte_buffer_reserve(
+        buffer, length
+    )) {
+        return false;
+    }
+
+    memcpy(
+        buffer->data +
+            buffer->count,
+        data,
+        length
+    );
+
+    buffer->count += length;
+    return true;
+}
+
+static bool byte_buffer_byte(
+    ByteBuffer *buffer,
+    char byte
+) {
+    return byte_buffer_append(
+        buffer, &byte, 1
+    );
+}
+
+typedef struct {
+    LuneVM *vm;
+    const char *chars;
+    size_t length;
+    size_t position;
+    unsigned depth;
+} JsonParser;
+
+static bool json_error(
+    JsonParser *parser,
+    const char *message
+) {
+    char diagnostic[256];
+
+    (void)snprintf(
+        diagnostic,
+        sizeof(diagnostic),
+        "json_parse(): %s at byte %zu",
+        message,
+        parser->position
+    );
+
+    return native_error(
+        parser->vm,
+        diagnostic
+    );
+}
+
+static void json_skip_space(
+    JsonParser *parser
+) {
+    while (
+        parser->position <
+        parser->length
+    ) {
+        char c =
+            parser->chars[
+                parser->position
+            ];
+
+        if (
+            c != ' ' &&
+            c != '\t' &&
+            c != '\r' &&
+            c != '\n'
+        ) {
+            break;
+        }
+
+        parser->position++;
+    }
+}
+
+static int json_hex(char c) {
+    if (
+        c >= '0' &&
+        c <= '9'
+    ) {
+        return c - '0';
+    }
+
+    if (
+        c >= 'a' &&
+        c <= 'f'
+    ) {
+        return 10 + c - 'a';
+    }
+
+    if (
+        c >= 'A' &&
+        c <= 'F'
+    ) {
+        return 10 + c - 'A';
+    }
+
+    return -1;
+}
+
+static bool json_append_utf8(
+    ByteBuffer *buffer,
+    uint32_t codepoint
+) {
+    char encoded[4];
+    size_t count = 0;
+
+    if (codepoint <= 0x7f) {
+        encoded[0] =
+            (char)codepoint;
+        count = 1;
+    } else if (
+        codepoint <= 0x7ff
+    ) {
+        encoded[0] = (char)(
+            0xc0u |
+            (codepoint >> 6)
+        );
+
+        encoded[1] = (char)(
+            0x80u |
+            (codepoint & 0x3fu)
+        );
+
+        count = 2;
+    } else if (
+        codepoint <= 0xffff
+    ) {
+        if (
+            codepoint >= 0xd800 &&
+            codepoint <= 0xdfff
+        ) {
+            return false;
+        }
+
+        encoded[0] = (char)(
+            0xe0u |
+            (codepoint >> 12)
+        );
+
+        encoded[1] = (char)(
+            0x80u |
+            ((codepoint >> 6) &
+                0x3fu)
+        );
+
+        encoded[2] = (char)(
+            0x80u |
+            (codepoint & 0x3fu)
+        );
+
+        count = 3;
+    } else if (
+        codepoint <= 0x10ffff
+    ) {
+        encoded[0] = (char)(
+            0xf0u |
+            (codepoint >> 18)
+        );
+
+        encoded[1] = (char)(
+            0x80u |
+            ((codepoint >> 12) &
+                0x3fu)
+        );
+
+        encoded[2] = (char)(
+            0x80u |
+            ((codepoint >> 6) &
+                0x3fu)
+        );
+
+        encoded[3] = (char)(
+            0x80u |
+            (codepoint & 0x3fu)
+        );
+
+        count = 4;
+    } else {
+        return false;
+    }
+
+    return byte_buffer_append(
+        buffer,
+        encoded,
+        count
+    );
+}
+
+static bool json_read_u16(
+    JsonParser *parser,
+    uint32_t *value
+) {
+    if (
+        parser->position + 4 >
+        parser->length
+    ) {
+        return json_error(
+            parser,
+            "truncated unicode escape"
+        );
+    }
+
+    uint32_t code = 0;
+
+    for (int i = 0; i < 4; i++) {
+        int hex = json_hex(
+            parser->chars[
+                parser->position++
+            ]
+        );
+
+        if (hex < 0) {
+            return json_error(
+                parser,
+                "invalid unicode escape"
+            );
+        }
+
+        code =
+            code * 16u +
+            (uint32_t)hex;
+    }
+
+    *value = code;
+    return true;
+}
+
+static bool json_parse_string_bytes(
+    JsonParser *parser,
+    ByteBuffer *buffer
+) {
+    if (
+        parser->position >=
+            parser->length ||
+        parser->chars[
+            parser->position
+        ] != '"'
+    ) {
+        return json_error(
+            parser,
+            "expected string"
+        );
+    }
+
+    parser->position++;
+
+    while (
+        parser->position <
+        parser->length
+    ) {
+        unsigned char c =
+            (unsigned char)
+                parser->chars[
+                    parser->position++
+                ];
+
+        if (c == '"') {
+            return true;
+        }
+
+        if (c < 0x20u) {
+            return json_error(
+                parser,
+                "control byte in string"
+            );
+        }
+
+        if (c != '\\') {
+            if (!byte_buffer_byte(
+                buffer, (char)c
+            )) {
+                return native_error(
+                    parser->vm,
+                    "out of memory"
+                );
+            }
+
+            continue;
+        }
+
+        if (
+            parser->position >=
+            parser->length
+        ) {
+            return json_error(
+                parser,
+                "truncated escape"
+            );
+        }
+
+        char escape =
+            parser->chars[
+                parser->position++
+            ];
+
+        switch (escape) {
+            case '"':
+            case '\\':
+            case '/':
+                if (!byte_buffer_byte(
+                    buffer, escape
+                )) {
+                    return native_error(
+                        parser->vm,
+                        "out of memory"
+                    );
+                }
+                break;
+
+            case 'b':
+                if (!byte_buffer_byte(
+                    buffer, '\b'
+                )) {
+                    return native_error(
+                        parser->vm,
+                        "out of memory"
+                    );
+                }
+                break;
+
+            case 'f':
+                if (!byte_buffer_byte(
+                    buffer, '\f'
+                )) {
+                    return native_error(
+                        parser->vm,
+                        "out of memory"
+                    );
+                }
+                break;
+
+            case 'n':
+                if (!byte_buffer_byte(
+                    buffer, '\n'
+                )) {
+                    return native_error(
+                        parser->vm,
+                        "out of memory"
+                    );
+                }
+                break;
+
+            case 'r':
+                if (!byte_buffer_byte(
+                    buffer, '\r'
+                )) {
+                    return native_error(
+                        parser->vm,
+                        "out of memory"
+                    );
+                }
+                break;
+
+            case 't':
+                if (!byte_buffer_byte(
+                    buffer, '\t'
+                )) {
+                    return native_error(
+                        parser->vm,
+                        "out of memory"
+                    );
+                }
+                break;
+
+            case 'u': {
+                uint32_t codepoint = 0;
+
+                if (!json_read_u16(
+                    parser,
+                    &codepoint
+                )) {
+                    return false;
+                }
+
+                if (
+                    codepoint >= 0xd800u &&
+                    codepoint <= 0xdbffu
+                ) {
+                    if (
+                        parser->position + 2 >
+                            parser->length ||
+                        parser->chars[
+                            parser->position
+                        ] != '\\' ||
+                        parser->chars[
+                            parser->position + 1
+                        ] != 'u'
+                    ) {
+                        return json_error(
+                            parser,
+                            "missing low surrogate"
+                        );
+                    }
+
+                    parser->position += 2;
+
+                    uint32_t low = 0;
+
+                    if (!json_read_u16(
+                        parser, &low
+                    )) {
+                        return false;
+                    }
+
+                    if (
+                        low < 0xdc00u ||
+                        low > 0xdfffu
+                    ) {
+                        return json_error(
+                            parser,
+                            "invalid low surrogate"
+                        );
+                    }
+
+                    codepoint =
+                        0x10000u +
+                        ((codepoint -
+                            0xd800u) << 10) +
+                        (low - 0xdc00u);
+                } else if (
+                    codepoint >= 0xdc00u &&
+                    codepoint <= 0xdfffu
+                ) {
+                    return json_error(
+                        parser,
+                        "unexpected low surrogate"
+                    );
+                }
+
+                if (!json_append_utf8(
+                    buffer,
+                    codepoint
+                )) {
+                    return native_error(
+                        parser->vm,
+                        "out of memory"
+                    );
+                }
+                break;
+            }
+
+            default:
+                return json_error(
+                    parser,
+                    "invalid string escape"
+                );
+        }
+    }
+
+    return json_error(
+        parser,
+        "unterminated string"
+    );
+}
+
+static bool json_parse_value(
+    JsonParser *parser,
+    LuneValue *result
+);
+
+static bool json_parse_array(
+    JsonParser *parser,
+    LuneValue *result
+) {
+    if (parser->depth >= 128) {
+        return json_error(
+            parser,
+            "nesting is too deep"
+        );
+    }
+
+    parser->depth++;
+    parser->position++;
+
+    size_t roots =
+        parser->vm->native_root_count;
+
+    json_skip_space(parser);
+
+    if (
+        parser->position <
+            parser->length &&
+        parser->chars[
+            parser->position
+        ] == ']'
+    ) {
+        parser->position++;
+
+        LuneObjList *list =
+            lune_list_new(
+                &parser->vm->heap,
+                NULL,
+                0
+            );
+
+        parser->depth--;
+
+        if (list == NULL) {
+            return native_error(
+                parser->vm,
+                "out of memory"
+            );
+        }
+
+        *result = lune_value_obj(
+            (LuneObj *)list
+        );
+        return true;
+    }
+
+    for (;;) {
+        LuneValue value =
+            lune_value_null();
+
+        if (!json_parse_value(
+            parser, &value
+        )) {
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return false;
+        }
+
+        if (!native_root_push(
+            parser->vm, value
+        )) {
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return false;
+        }
+
+        json_skip_space(parser);
+
+        if (
+            parser->position >=
+            parser->length
+        ) {
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return json_error(
+                parser,
+                "unterminated array"
+            );
+        }
+
+        char c =
+            parser->chars[
+                parser->position++
+            ];
+
+        if (c == ']') {
+            break;
+        }
+
+        if (c != ',') {
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return json_error(
+                parser,
+                "expected ',' or ']'"
+            );
+        }
+
+        json_skip_space(parser);
+    }
+
+    size_t count =
+        parser->vm->native_root_count -
+        roots;
+
+    const LuneValue *items =
+        count == 0
+        ? NULL
+        : parser->vm->native_roots +
+            roots;
+
+    LuneObjList *list =
+        lune_list_new(
+            &parser->vm->heap,
+            items,
+            count
+        );
+
+    native_roots_restore(
+        parser->vm, roots
+    );
+
+    parser->depth--;
+
+    if (list == NULL) {
+        return native_error(
+            parser->vm,
+            "out of memory"
+        );
+    }
+
+    *result = lune_value_obj(
+        (LuneObj *)list
+    );
+
+    return true;
+}
+
+static bool json_parse_object(
+    JsonParser *parser,
+    LuneValue *result
+) {
+    if (parser->depth >= 128) {
+        return json_error(
+            parser,
+            "nesting is too deep"
+        );
+    }
+
+    parser->depth++;
+    parser->position++;
+
+    LuneObjMap *map =
+        lune_map_new(
+            &parser->vm->heap
+        );
+
+    if (map == NULL) {
+        parser->depth--;
+        return native_error(
+            parser->vm,
+            "out of memory"
+        );
+    }
+
+    size_t roots =
+        parser->vm->native_root_count;
+
+    if (!native_root_push(
+        parser->vm,
+        lune_value_obj(
+            (LuneObj *)map
+        )
+    )) {
+        parser->depth--;
+        return false;
+    }
+
+    json_skip_space(parser);
+
+    if (
+        parser->position <
+            parser->length &&
+        parser->chars[
+            parser->position
+        ] == '}'
+    ) {
+        parser->position++;
+
+        native_roots_restore(
+            parser->vm, roots
+        );
+
+        parser->depth--;
+
+        *result = lune_value_obj(
+            (LuneObj *)map
+        );
+
+        return true;
+    }
+
+    for (;;) {
+        ByteBuffer key = {0};
+
+        if (!json_parse_string_bytes(
+            parser, &key
+        )) {
+            byte_buffer_free(&key);
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return false;
+        }
+
+        json_skip_space(parser);
+
+        if (
+            parser->position >=
+                parser->length ||
+            parser->chars[
+                parser->position
+            ] != ':'
+        ) {
+            byte_buffer_free(&key);
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return json_error(
+                parser,
+                "expected ':'"
+            );
+        }
+
+        parser->position++;
+        json_skip_space(parser);
+
+        LuneValue value =
+            lune_value_null();
+
+        if (!json_parse_value(
+            parser, &value
+        )) {
+            byte_buffer_free(&key);
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return false;
+        }
+
+        if (!native_root_push(
+            parser->vm, value
+        )) {
+            byte_buffer_free(&key);
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return false;
+        }
+
+        bool set = lune_map_set_chars(
+            &parser->vm->heap,
+            map,
+            key.data == NULL
+                ? ""
+                : key.data,
+            key.count,
+            value
+        );
+
+        byte_buffer_free(&key);
+
+        native_roots_restore(
+            parser->vm,
+            roots + 1
+        );
+
+        if (!set) {
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return native_error(
+                parser->vm,
+                "out of memory"
+            );
+        }
+
+        json_skip_space(parser);
+
+        if (
+            parser->position >=
+            parser->length
+        ) {
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return json_error(
+                parser,
+                "unterminated object"
+            );
+        }
+
+        char c =
+            parser->chars[
+                parser->position++
+            ];
+
+        if (c == '}') {
+            break;
+        }
+
+        if (c != ',') {
+            native_roots_restore(
+                parser->vm, roots
+            );
+            parser->depth--;
+            return json_error(
+                parser,
+                "expected ',' or '}'"
+            );
+        }
+
+        json_skip_space(parser);
+    }
+
+    native_roots_restore(
+        parser->vm, roots
+    );
+
+    parser->depth--;
+
+    *result = lune_value_obj(
+        (LuneObj *)map
+    );
+
+    return true;
+}
+
+static bool json_parse_number(
+    JsonParser *parser,
+    LuneValue *result
+) {
+    size_t start =
+        parser->position;
+
+    if (
+        parser->chars[
+            parser->position
+        ] == '-'
+    ) {
+        parser->position++;
+
+        if (
+            parser->position >=
+            parser->length
+        ) {
+            return json_error(
+                parser,
+                "invalid number"
+            );
+        }
+    }
+
+    if (
+        parser->chars[
+            parser->position
+        ] == '0'
+    ) {
+        parser->position++;
+    } else if (
+        parser->chars[
+            parser->position
+        ] >= '1' &&
+        parser->chars[
+            parser->position
+        ] <= '9'
+    ) {
+        while (
+            parser->position <
+                parser->length &&
+            parser->chars[
+                parser->position
+            ] >= '0' &&
+            parser->chars[
+                parser->position
+            ] <= '9'
+        ) {
+            parser->position++;
+        }
+    } else {
+        return json_error(
+            parser,
+            "invalid number"
+        );
+    }
+
+    bool floating = false;
+
+    if (
+        parser->position <
+            parser->length &&
+        parser->chars[
+            parser->position
+        ] == '.'
+    ) {
+        floating = true;
+        parser->position++;
+
+        size_t digits =
+            parser->position;
+
+        while (
+            parser->position <
+                parser->length &&
+            parser->chars[
+                parser->position
+            ] >= '0' &&
+            parser->chars[
+                parser->position
+            ] <= '9'
+        ) {
+            parser->position++;
+        }
+
+        if (
+            parser->position ==
+            digits
+        ) {
+            return json_error(
+                parser,
+                "invalid fraction"
+            );
+        }
+    }
+
+    if (
+        parser->position <
+            parser->length &&
+        (
+            parser->chars[
+                parser->position
+            ] == 'e' ||
+            parser->chars[
+                parser->position
+            ] == 'E'
+        )
+    ) {
+        floating = true;
+        parser->position++;
+
+        if (
+            parser->position <
+                parser->length &&
+            (
+                parser->chars[
+                    parser->position
+                ] == '+' ||
+                parser->chars[
+                    parser->position
+                ] == '-'
+            )
+        ) {
+            parser->position++;
+        }
+
+        size_t digits =
+            parser->position;
+
+        while (
+            parser->position <
+                parser->length &&
+            parser->chars[
+                parser->position
+            ] >= '0' &&
+            parser->chars[
+                parser->position
+            ] <= '9'
+        ) {
+            parser->position++;
+        }
+
+        if (
+            parser->position ==
+            digits
+        ) {
+            return json_error(
+                parser,
+                "invalid exponent"
+            );
+        }
+    }
+
+    size_t length =
+        parser->position - start;
+
+    char *text =
+        malloc(length + 1);
+
+    if (text == NULL) {
+        return native_error(
+            parser->vm,
+            "out of memory"
+        );
+    }
+
+    memcpy(
+        text,
+        parser->chars + start,
+        length
+    );
+
+    text[length] = '\0';
+
+    if (!floating) {
+        errno = 0;
+        char *end = NULL;
+
+        long long integer =
+            strtoll(
+                text,
+                &end,
+                10
+            );
+
+        if (
+            errno != ERANGE &&
+            end != text &&
+            *end == '\0'
+        ) {
+            free(text);
+
+            *result = lune_value_int(
+                (int64_t)integer
+            );
+
+            return true;
+        }
+    }
+
+    errno = 0;
+    char *end = NULL;
+    double number =
+        strtod(text, &end);
+
+    bool valid =
+        errno != ERANGE &&
+        end != text &&
+        *end == '\0' &&
+        isfinite(number);
+
+    free(text);
+
+    if (!valid) {
+        return json_error(
+            parser,
+            "number is out of range"
+        );
+    }
+
+    *result =
+        lune_value_float(number);
+
+    return true;
+}
+
+static bool json_match_literal(
+    JsonParser *parser,
+    const char *literal
+) {
+    size_t length =
+        strlen(literal);
+
+    if (
+        parser->position + length >
+        parser->length
+    ) {
+        return false;
+    }
+
+    if (
+        memcmp(
+            parser->chars +
+                parser->position,
+            literal,
+            length
+        ) != 0
+    ) {
+        return false;
+    }
+
+    parser->position += length;
+    return true;
+}
+
+static bool json_parse_value(
+    JsonParser *parser,
+    LuneValue *result
+) {
+    json_skip_space(parser);
+
+    if (
+        parser->position >=
+        parser->length
+    ) {
+        return json_error(
+            parser,
+            "expected value"
+        );
+    }
+
+    char c =
+        parser->chars[
+            parser->position
+        ];
+
+    if (c == '"') {
+        ByteBuffer string = {0};
+
+        if (!json_parse_string_bytes(
+            parser, &string
+        )) {
+            byte_buffer_free(&string);
+            return false;
+        }
+
+        bool ok = make_string_value(
+            parser->vm,
+            string.data == NULL
+                ? ""
+                : string.data,
+            string.count,
+            result
+        );
+
+        byte_buffer_free(&string);
+        return ok;
+    }
+
+    if (c == '[') {
+        return json_parse_array(
+            parser, result
+        );
+    }
+
+    if (c == '{') {
+        return json_parse_object(
+            parser, result
+        );
+    }
+
+    if (
+        c == '-' ||
+        (c >= '0' && c <= '9')
+    ) {
+        return json_parse_number(
+            parser, result
+        );
+    }
+
+    if (json_match_literal(
+        parser, "true"
+    )) {
+        *result =
+            lune_value_bool(true);
+        return true;
+    }
+
+    if (json_match_literal(
+        parser, "false"
+    )) {
+        *result =
+            lune_value_bool(false);
+        return true;
+    }
+
+    if (json_match_literal(
+        parser, "null"
+    )) {
+        *result =
+            lune_value_null();
+        return true;
+    }
+
+    return json_error(
+        parser,
+        "invalid value"
+    );
+}
+
+static bool native_json_parse(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *json =
+        as_string(args[0]);
+
+    if (json == NULL) {
+        return native_error(
+            vm,
+            "json_parse() expects a string"
+        );
+    }
+
+    JsonParser parser = {
+        .vm = vm,
+        .chars = json->chars,
+        .length = json->length,
+    };
+
+    size_t roots =
+        vm->native_root_count;
+
+    if (!json_parse_value(
+        &parser, result
+    )) {
+        native_roots_restore(
+            vm, roots
+        );
+        return false;
+    }
+
+    if (!native_root_push(
+        vm, *result
+    )) {
+        native_roots_restore(
+            vm, roots
+        );
+        return false;
+    }
+
+    json_skip_space(&parser);
+
+    bool complete =
+        parser.position ==
+        parser.length;
+
+    native_roots_restore(
+        vm, roots
+    );
+
+    if (!complete) {
+        return json_error(
+            &parser,
+            "trailing data"
+        );
+    }
+
+    return true;
+}
+
+typedef struct {
+    LuneVM *vm;
+    ByteBuffer output;
+    LuneObj **path;
+    size_t path_count;
+    size_t path_capacity;
+    unsigned depth;
+} JsonWriter;
+
+static bool json_writer_error(
+    JsonWriter *writer,
+    const char *message
+) {
+    return native_error(
+        writer->vm,
+        message
+    );
+}
+
+static bool json_writer_append(
+    JsonWriter *writer,
+    const char *data,
+    size_t length
+) {
+    if (!byte_buffer_append(
+        &writer->output,
+        data,
+        length
+    )) {
+        return json_writer_error(
+            writer,
+            "out of memory"
+        );
+    }
+
+    return true;
+}
+
+static bool json_writer_byte(
+    JsonWriter *writer,
+    char byte
+) {
+    return json_writer_append(
+        writer, &byte, 1
+    );
+}
+
+static bool json_write_string(
+    JsonWriter *writer,
+    const char *chars,
+    size_t length
+) {
+    if (!json_writer_byte(
+        writer, '"'
+    )) {
+        return false;
+    }
+
+    static const char hex[] =
+        "0123456789abcdef";
+
+    for (
+        size_t i = 0;
+        i < length;
+        i++
+    ) {
+        unsigned char c =
+            (unsigned char)chars[i];
+
+        switch (c) {
+            case '"':
+                if (!json_writer_append(
+                    writer, "\\\"", 2
+                )) {
+                    return false;
+                }
+                break;
+
+            case '\\':
+                if (!json_writer_append(
+                    writer, "\\\\", 2
+                )) {
+                    return false;
+                }
+                break;
+
+            case '\b':
+                if (!json_writer_append(
+                    writer, "\\b", 2
+                )) {
+                    return false;
+                }
+                break;
+
+            case '\f':
+                if (!json_writer_append(
+                    writer, "\\f", 2
+                )) {
+                    return false;
+                }
+                break;
+
+            case '\n':
+                if (!json_writer_append(
+                    writer, "\\n", 2
+                )) {
+                    return false;
+                }
+                break;
+
+            case '\r':
+                if (!json_writer_append(
+                    writer, "\\r", 2
+                )) {
+                    return false;
+                }
+                break;
+
+            case '\t':
+                if (!json_writer_append(
+                    writer, "\\t", 2
+                )) {
+                    return false;
+                }
+                break;
+
+            default:
+                if (c < 0x20u) {
+                    char escaped[6] = {
+                        '\\', 'u', '0', '0',
+                        hex[c >> 4],
+                        hex[c & 0x0fu],
+                    };
+
+                    if (!json_writer_append(
+                        writer,
+                        escaped,
+                        sizeof(escaped)
+                    )) {
+                        return false;
+                    }
+                } else if (!json_writer_byte(
+                    writer, (char)c
+                )) {
+                    return false;
+                }
+                break;
+        }
+    }
+
+    return json_writer_byte(
+        writer, '"'
+    );
+}
+
+static bool json_writer_path_push(
+    JsonWriter *writer,
+    LuneObj *object
+) {
+    for (
+        size_t i = 0;
+        i < writer->path_count;
+        i++
+    ) {
+        if (
+            writer->path[i] ==
+            object
+        ) {
+            return json_writer_error(
+                writer,
+                "json_stringify(): cyclic value"
+            );
+        }
+    }
+
+    if (
+        writer->path_count ==
+        writer->path_capacity
+    ) {
+        size_t next =
+            writer->path_capacity == 0
+            ? 16
+            : writer->path_capacity * 2;
+
+        if (
+            next <
+                writer->path_capacity ||
+            next >
+                SIZE_MAX /
+                    sizeof(*writer->path)
+        ) {
+            return json_writer_error(
+                writer,
+                "json_stringify(): nesting is too deep"
+            );
+        }
+
+        LuneObj **grown =
+            realloc(
+                writer->path,
+                next *
+                    sizeof(*writer->path)
+            );
+
+        if (grown == NULL) {
+            return json_writer_error(
+                writer,
+                "out of memory"
+            );
+        }
+
+        writer->path = grown;
+        writer->path_capacity = next;
+    }
+
+    writer->path[
+        writer->path_count++
+    ] = object;
+
+    return true;
+}
+
+static bool json_write_value(
+    JsonWriter *writer,
+    LuneValue value
+) {
+    switch (value.kind) {
+        case LUNE_VALUE_NULL:
+            return json_writer_append(
+                writer, "null", 4
+            );
+
+        case LUNE_VALUE_BOOL:
+            return value.as.boolean
+                ? json_writer_append(
+                    writer, "true", 4
+                )
+                : json_writer_append(
+                    writer, "false", 5
+                );
+
+        case LUNE_VALUE_INT: {
+            char number[64];
+            int written = snprintf(
+                number,
+                sizeof(number),
+                "%lld",
+                (long long)
+                    value.as.integer
+            );
+
+            if (
+                written < 0 ||
+                (size_t)written >=
+                    sizeof(number)
+            ) {
+                return json_writer_error(
+                    writer,
+                    "json_stringify(): integer conversion failed"
+                );
+            }
+
+            return json_writer_append(
+                writer,
+                number,
+                (size_t)written
+            );
+        }
+
+        case LUNE_VALUE_FLOAT: {
+            if (!isfinite(
+                value.as.floating
+            )) {
+                return json_writer_error(
+                    writer,
+                    "json_stringify(): non-finite float"
+                );
+            }
+
+            char number[64];
+            int written = snprintf(
+                number,
+                sizeof(number),
+                "%.17g",
+                value.as.floating
+            );
+
+            if (
+                written < 0 ||
+                (size_t)written >=
+                    sizeof(number)
+            ) {
+                return json_writer_error(
+                    writer,
+                    "json_stringify(): float conversion failed"
+                );
+            }
+
+            return json_writer_append(
+                writer,
+                number,
+                (size_t)written
+            );
+        }
+
+        case LUNE_VALUE_OBJ:
+            break;
+    }
+
+    if (lune_obj_is_string(
+        value.as.object
+    )) {
+        LuneObjString *string =
+            (LuneObjString *)
+                value.as.object;
+
+        return json_write_string(
+            writer,
+            string->chars,
+            string->length
+        );
+    }
+
+    if (
+        writer->depth >= 128
+    ) {
+        return json_writer_error(
+            writer,
+            "json_stringify(): nesting is too deep"
+        );
+    }
+
+    if (lune_obj_is_list(
+        value.as.object
+    )) {
+        if (!json_writer_path_push(
+            writer,
+            value.as.object
+        )) {
+            return false;
+        }
+
+        writer->depth++;
+
+        LuneObjList *list =
+            (LuneObjList *)
+                value.as.object;
+
+        if (!json_writer_byte(
+            writer, '['
+        )) {
+            writer->depth--;
+            writer->path_count--;
+            return false;
+        }
+
+        for (
+            size_t i = 0;
+            i < list->count;
+            i++
+        ) {
+            if (
+                i != 0 &&
+                !json_writer_byte(
+                    writer, ','
+                )
+            ) {
+                writer->depth--;
+                writer->path_count--;
+                return false;
+            }
+
+            if (!json_write_value(
+                writer,
+                list->items[i]
+            )) {
+                writer->depth--;
+                writer->path_count--;
+                return false;
+            }
+        }
+
+        bool ok = json_writer_byte(
+            writer, ']'
+        );
+
+        writer->depth--;
+        writer->path_count--;
+        return ok;
+    }
+
+    if (lune_obj_is_map(
+        value.as.object
+    )) {
+        if (!json_writer_path_push(
+            writer,
+            value.as.object
+        )) {
+            return false;
+        }
+
+        writer->depth++;
+
+        LuneObjMap *map =
+            (LuneObjMap *)
+                value.as.object;
+
+        if (!json_writer_byte(
+            writer, '{'
+        )) {
+            writer->depth--;
+            writer->path_count--;
+            return false;
+        }
+
+        for (
+            size_t i = 0;
+            i < map->count;
+            i++
+        ) {
+            if (
+                i != 0 &&
+                !json_writer_byte(
+                    writer, ','
+                )
+            ) {
+                writer->depth--;
+                writer->path_count--;
+                return false;
+            }
+
+            if (
+                !json_write_string(
+                    writer,
+                    map->entries[i]
+                        .key->chars,
+                    map->entries[i]
+                        .key->length
+                ) ||
+                !json_writer_byte(
+                    writer, ':'
+                ) ||
+                !json_write_value(
+                    writer,
+                    map->entries[i]
+                        .value
+                )
+            ) {
+                writer->depth--;
+                writer->path_count--;
+                return false;
+            }
+        }
+
+        bool ok = json_writer_byte(
+            writer, '}'
+        );
+
+        writer->depth--;
+        writer->path_count--;
+        return ok;
+    }
+
+    return json_writer_error(
+        writer,
+        "json_stringify(): unsupported value type"
+    );
+}
+
+static bool native_json_stringify(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    JsonWriter writer = {
+        .vm = vm,
+    };
+
+    bool ok = json_write_value(
+        &writer, args[0]
+    );
+
+    if (ok) {
+        ok = make_string_value(
+            vm,
+            writer.output.data == NULL
+                ? ""
+                : writer.output.data,
+            writer.output.count,
+            result
+        );
+    }
+
+    byte_buffer_free(
+        &writer.output
+    );
+
+    free(writer.path);
+    return ok;
+}
+
 static bool native_env(
     LuneVM *vm,
     int argc,
@@ -4046,6 +5855,14 @@ static bool prepare_run(
         !define_native(
             vm, "reduce", 3,
             native_reduce
+        ) ||
+        !define_native(
+            vm, "json_parse", 1,
+            native_json_parse
+        ) ||
+        !define_native(
+            vm, "json_stringify", 1,
+            native_json_stringify
         ) ||
         !define_native(
             vm, "env", 1, native_env
