@@ -1632,6 +1632,443 @@ static bool native_bool(
     return true;
 }
 
+static bool string_find_bytes(
+    const LuneObjString *haystack,
+    const LuneObjString *needle,
+    size_t start,
+    size_t *index
+) {
+    if (start > haystack->length) {
+        return false;
+    }
+
+    if (needle->length == 0) {
+        *index = start;
+        return true;
+    }
+
+    if (
+        needle->length >
+        haystack->length - start
+    ) {
+        return false;
+    }
+
+    size_t last =
+        haystack->length -
+        needle->length;
+
+    for (
+        size_t i = start;
+        i <= last;
+        i++
+    ) {
+        if (
+            memcmp(
+                haystack->chars + i,
+                needle->chars,
+                needle->length
+            ) == 0
+        ) {
+            *index = i;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool native_contains(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *haystack =
+        as_string(args[0]);
+    LuneObjString *needle =
+        as_string(args[1]);
+
+    if (
+        haystack == NULL ||
+        needle == NULL
+    ) {
+        return native_error(
+            vm,
+            "contains() expects two strings"
+        );
+    }
+
+    size_t index = 0;
+
+    *result = lune_value_bool(
+        string_find_bytes(
+            haystack,
+            needle,
+            0,
+            &index
+        )
+    );
+
+    return true;
+}
+
+static bool native_find(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *haystack =
+        as_string(args[0]);
+    LuneObjString *needle =
+        as_string(args[1]);
+
+    if (
+        haystack == NULL ||
+        needle == NULL
+    ) {
+        return native_error(
+            vm,
+            "find() expects two strings"
+        );
+    }
+
+    size_t index = 0;
+
+    if (!string_find_bytes(
+        haystack,
+        needle,
+        0,
+        &index
+    )) {
+        *result = lune_value_null();
+        return true;
+    }
+
+    if (
+        index >
+        (size_t)INT64_MAX
+    ) {
+        return native_error(
+            vm,
+            "string index is too large"
+        );
+    }
+
+    *result = lune_value_int(
+        (int64_t)index
+    );
+    return true;
+}
+
+static bool native_split(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *text =
+        as_string(args[0]);
+    LuneObjString *separator =
+        as_string(args[1]);
+
+    if (
+        text == NULL ||
+        separator == NULL
+    ) {
+        return native_error(
+            vm,
+            "split() expects two strings"
+        );
+    }
+
+    if (separator->length == 0) {
+        return native_error(
+            vm,
+            "split() separator must not be empty"
+        );
+    }
+
+    size_t count = 1;
+    size_t scan = 0;
+    size_t found = 0;
+
+    while (string_find_bytes(
+        text,
+        separator,
+        scan,
+        &found
+    )) {
+        if (count == SIZE_MAX) {
+            return native_error(
+                vm,
+                "split() result is too large"
+            );
+        }
+
+        count++;
+        scan =
+            found +
+            separator->length;
+    }
+
+    if (
+        count >
+        SIZE_MAX /
+            sizeof(LuneValue)
+    ) {
+        return native_error(
+            vm,
+            "split() result is too large"
+        );
+    }
+
+    LuneValue *items =
+        calloc(
+            count,
+            sizeof(*items)
+        );
+
+    if (
+        items == NULL &&
+        count != 0
+    ) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    LuneObjList *list =
+        lune_list_new(
+            &vm->heap,
+            items,
+            count
+        );
+
+    free(items);
+
+    if (list == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    LuneValue list_value =
+        lune_value_obj(
+            (LuneObj *)list
+        );
+
+    if (!push(
+        vm,
+        list_value,
+        vm->native_span
+    )) {
+        return false;
+    }
+
+    scan = 0;
+    size_t item = 0;
+
+    while (
+        item + 1 < count &&
+        string_find_bytes(
+            text,
+            separator,
+            scan,
+            &found
+        )
+    ) {
+        LuneObjString *piece =
+            lune_string_new(
+                &vm->heap,
+                text->chars + scan,
+                found - scan
+            );
+
+        if (piece == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+
+        list->items[item++] =
+            lune_value_obj(
+                (LuneObj *)piece
+            );
+
+        scan =
+            found +
+            separator->length;
+    }
+
+    LuneObjString *piece =
+        lune_string_new(
+            &vm->heap,
+            text->chars + scan,
+            text->length - scan
+        );
+
+    if (piece == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    list->items[item] =
+        lune_value_obj(
+            (LuneObj *)piece
+        );
+
+    LuneValue rooted;
+
+    if (!pop(
+        vm,
+        &rooted,
+        vm->native_span
+    )) {
+        return false;
+    }
+
+    *result = rooted;
+    return true;
+}
+
+static bool native_join(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *items =
+        as_list(args[0]);
+    LuneObjString *separator =
+        as_string(args[1]);
+
+    if (
+        items == NULL ||
+        separator == NULL
+    ) {
+        return native_error(
+            vm,
+            "join() expects a list and a string separator"
+        );
+    }
+
+    size_t length = 0;
+
+    for (
+        size_t i = 0;
+        i < items->count;
+        i++
+    ) {
+        LuneObjString *item =
+            as_string(
+                items->items[i]
+            );
+
+        if (item == NULL) {
+            return native_error(
+                vm,
+                "join() list items must be strings"
+            );
+        }
+
+        if (
+            item->length >
+            SIZE_MAX - length
+        ) {
+            return native_error(
+                vm,
+                "join() result is too large"
+            );
+        }
+
+        length += item->length;
+
+        if (
+            i + 1 < items->count
+        ) {
+            if (
+                separator->length >
+                SIZE_MAX - length
+            ) {
+                return native_error(
+                    vm,
+                    "join() result is too large"
+                );
+            }
+
+            length +=
+                separator->length;
+        }
+    }
+
+    char *buffer =
+        malloc(length);
+
+    if (
+        buffer == NULL &&
+        length != 0
+    ) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    size_t offset = 0;
+
+    for (
+        size_t i = 0;
+        i < items->count;
+        i++
+    ) {
+        LuneObjString *item =
+            (LuneObjString *)
+                items->items[i]
+                    .as.object;
+
+        memcpy(
+            buffer + offset,
+            item->chars,
+            item->length
+        );
+
+        offset += item->length;
+
+        if (
+            i + 1 < items->count
+        ) {
+            memcpy(
+                buffer + offset,
+                separator->chars,
+                separator->length
+            );
+
+            offset +=
+                separator->length;
+        }
+    }
+
+    bool ok = make_string_value(
+        vm,
+        buffer,
+        length,
+        result
+    );
+
+    free(buffer);
+    return ok;
+}
+
 static bool native_env(
     LuneVM *vm,
     int argc,
@@ -2827,6 +3264,22 @@ static bool prepare_run(
         ) ||
         !define_native(
             vm, "bool", 1, native_bool
+        ) ||
+        !define_native(
+            vm, "contains", 2,
+            native_contains
+        ) ||
+        !define_native(
+            vm, "find", 2,
+            native_find
+        ) ||
+        !define_native(
+            vm, "split", 2,
+            native_split
+        ) ||
+        !define_native(
+            vm, "join", 2,
+            native_join
         ) ||
         !define_native(
             vm, "env", 1, native_env

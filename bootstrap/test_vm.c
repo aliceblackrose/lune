@@ -750,6 +750,48 @@ int main(void) {
         "exit(300)\n"
     );
 
+    expect_bool(
+        "string-contains",
+        "contains(\"hello lune\", \"lune\")\n",
+        true
+    );
+
+    expect_int(
+        "string-find",
+        "find(\"hello lune\", \"lune\")\n",
+        6
+    );
+
+    expect_null(
+        "string-find-missing",
+        "find(\"hello\", \"z\")\n"
+    );
+
+    expect_string(
+        "string-split",
+        "parts := split(\"a,b,c\", \",\")\n"
+        "parts[1]\n",
+        "b",
+        1
+    );
+
+    expect_string(
+        "string-join",
+        "join([\"a\", \"b\", \"c\"], \"-\")\n",
+        "a-b-c",
+        5
+    );
+
+    expect_error(
+        "split-empty-separator",
+        "split(\"abc\", \"\")\n"
+    );
+
+    expect_error(
+        "join-item-type",
+        "join([\"a\", 1], \",\")\n"
+    );
+
     expect_string(
         "path-join",
         "path_join(\"alpha\", \"beta\")\n",
