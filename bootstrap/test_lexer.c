@@ -1,0 +1,150 @@
+#include "lexer.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static int failures = 0;
+
+static void discard_diagnostic(void *context, LuneSpan span, const char *message) {
+    (void)span;
+    (void)message;
+    int *count = context;
+    (*count)++;
+}
+
+static void fail(const char *test, const char *message) {
+    fprintf(stderr, "FAIL %s: %s\n", test, message);
+    failures++;
+}
+
+static void expect_kinds(
+    const char *test,
+    const char *source,
+    const LuneTokenKind *expected,
+    size_t count
+) {
+    int diagnostics = 0;
+    LuneLexer lexer;
+    lune_lexer_init(&lexer, source, strlen(source), discard_diagnostic, &diagnostics);
+
+    for (size_t i = 0; i < count; i++) {
+        LuneToken token = lune_lexer_next(&lexer);
+        if (token.kind != expected[i]) {
+            char message[160];
+            snprintf(
+                message,
+                sizeof(message),
+                "token %zu: expected %s, got %s",
+                i,
+                lune_token_kind_name(expected[i]),
+                lune_token_kind_name(token.kind)
+            );
+            fail(test, message);
+            return;
+        }
+    }
+}
+
+static void test_basic(void) {
+    const LuneTokenKind expected[] = {
+        LUNE_TOKEN_IDENTIFIER, LUNE_TOKEN_DECLARE, LUNE_TOKEN_NUMBER,
+        LUNE_TOKEN_NEWLINE, LUNE_TOKEN_EOF,
+    };
+    expect_kinds("basic", "x := 42\n", expected, sizeof(expected) / sizeof(expected[0]));
+}
+
+static void test_keywords_and_ops(void) {
+    const LuneTokenKind expected[] = {
+        LUNE_TOKEN_FN, LUNE_TOKEN_IF, LUNE_TOKEN_ELSE, LUNE_TOKEN_WHILE,
+        LUNE_TOKEN_TRUE, LUNE_TOKEN_FALSE, LUNE_TOKEN_NULL,
+        LUNE_TOKEN_AND, LUNE_TOKEN_OR, LUNE_TOKEN_NOT,
+        LUNE_TOKEN_DECLARE, LUNE_TOKEN_ARROW, LUNE_TOKEN_EQ, LUNE_TOKEN_NE,
+        LUNE_TOKEN_LE, LUNE_TOKEN_GE, LUNE_TOKEN_ASSIGN, LUNE_TOKEN_LT,
+        LUNE_TOKEN_GT, LUNE_TOKEN_PLUS, LUNE_TOKEN_MINUS, LUNE_TOKEN_STAR,
+        LUNE_TOKEN_SLASH, LUNE_TOKEN_PERCENT, LUNE_TOKEN_EOF,
+    };
+    expect_kinds(
+        "keywords-and-ops",
+        "fn if else while true false null and or not := => == != <= >= = < > + - * / %",
+        expected,
+        sizeof(expected) / sizeof(expected[0])
+    );
+}
+
+static void test_comment_keeps_newline(void) {
+    const LuneTokenKind expected[] = {
+        LUNE_TOKEN_IDENTIFIER, LUNE_TOKEN_NEWLINE,
+        LUNE_TOKEN_IDENTIFIER, LUNE_TOKEN_EOF,
+    };
+    expect_kinds(
+        "comment-newline",
+        "a // note\nb",
+        expected,
+        sizeof(expected) / sizeof(expected[0])
+    );
+}
+
+static void test_string_escapes(void) {
+    const LuneTokenKind expected[] = {LUNE_TOKEN_STRING, LUNE_TOKEN_EOF};
+    expect_kinds(
+        "string-escapes",
+        "\"x\\n\\u{1F680}\"",
+        expected,
+        sizeof(expected) / sizeof(expected[0])
+    );
+}
+
+static void test_invalid_character(void) {
+    int diagnostics = 0;
+    LuneLexer lexer;
+    const char *source = ";";
+    lune_lexer_init(&lexer, source, strlen(source), discard_diagnostic, &diagnostics);
+    LuneToken token = lune_lexer_next(&lexer);
+
+    if (token.kind != LUNE_TOKEN_ERROR || diagnostics != 1 || !lexer.had_error) {
+        fail("invalid-character", "expected one lexical error");
+    }
+}
+
+static void test_unterminated_string(void) {
+    int diagnostics = 0;
+    LuneLexer lexer;
+    const char *source = "\"nope";
+    lune_lexer_init(&lexer, source, strlen(source), discard_diagnostic, &diagnostics);
+    LuneToken token = lune_lexer_next(&lexer);
+
+    if (token.kind != LUNE_TOKEN_ERROR || diagnostics != 1) {
+        fail("unterminated-string", "expected unterminated string error");
+    }
+}
+
+static void test_span(void) {
+    LuneLexer lexer;
+    const char *source = "\n  hello";
+    lune_lexer_init(&lexer, source, strlen(source), NULL, NULL);
+    (void)lune_lexer_next(&lexer);
+    LuneToken token = lune_lexer_next(&lexer);
+
+    if (token.span.line != 2 || token.span.column != 3 ||
+        token.span.offset != 3 || token.span.length != 5) {
+        fail("span", "identifier span is incorrect");
+    }
+}
+
+int main(void) {
+    test_basic();
+    test_keywords_and_ops();
+    test_comment_keeps_newline();
+    test_string_escapes();
+    test_invalid_character();
+    test_unterminated_string();
+    test_span();
+
+    if (failures != 0) {
+        fprintf(stderr, "%d lexer test(s) failed\n", failures);
+        return 1;
+    }
+
+    puts("lexer tests passed");
+    return 0;
+}

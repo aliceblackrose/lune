@@ -104,11 +104,11 @@ ANTLR may be used as an early reference/prototyping aid, but it is not part of t
 
 ### Lexer
 
-- [ ] Hand-written lexer.
-- [ ] Source spans on every token.
-- [ ] Useful lexical diagnostics.
-- [ ] Escape sequences in strings.
-- [ ] Newlines preserved where syntactically relevant.
+- [x] Hand-written lexer.
+- [x] Source spans on every token.
+- [x] Useful lexical diagnostics.
+- [x] Escape sequences in strings.
+- [x] Newlines preserved where syntactically relevant.
 
 ### Parser
 

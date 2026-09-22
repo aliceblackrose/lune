@@ -13,3 +13,13 @@ print(greet(user.name))
 See [the language contract](docs/language.md) for current semantics and [the roadmap](ROADMAP.md) for implementation milestones.
 
 The ANTLR grammar under `grammar/` is a reference/prototyping grammar. The long-term frontend is intended to be a hand-written lexer and Pratt parser so the compiler can be self-hosted.
+
+## Bootstrap development
+
+The current bootstrap frontend is dependency-free C17.
+
+```sh
+make
+make test
+./bootstrap/build/lune-bootstrap lex examples/hello.lune
+```
