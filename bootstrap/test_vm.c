@@ -807,6 +807,68 @@ int main(void) {
         "format(\"{} {}\", [1])\n"
     );
 
+    expect_int(
+        "list-each",
+        "sum := 0\n"
+        "each([1, 2, 3], fn(x) => {\n"
+        "  sum = sum + x\n"
+        "  null\n"
+        "})\n"
+        "sum\n",
+        6
+    );
+
+    expect_int(
+        "list-map",
+        "mapped := map("
+        "[1, 2, 3], "
+        "fn(x) => x * 10"
+        ")\n"
+        "mapped[2]\n",
+        30
+    );
+
+    expect_int(
+        "list-filter",
+        "filtered := filter("
+        "[1, 2, 3, 4, 5], "
+        "fn(x) => x % 2 == 0"
+        ")\n"
+        "filtered[1]\n",
+        4
+    );
+
+    expect_int(
+        "list-reduce",
+        "reduce("
+        "[1, 2, 3, 4], "
+        "0, "
+        "fn(acc, x) => acc + x"
+        ")\n",
+        10
+    );
+
+    expect_int(
+        "higher-order-closure",
+        "factor := 3\n"
+        "map([1, 2], "
+        "fn(x) => x * factor"
+        ")[1]\n",
+        6
+    );
+
+    expect_string(
+        "higher-order-native-callback",
+        "map([1, 2], str)[1]\n",
+        "2",
+        1
+    );
+
+    expect_error(
+        "higher-order-callback-arity",
+        "map([1], fn(a, b) => a)\n"
+    );
+
     expect_string(
         "path-join",
         "path_join(\"alpha\", \"beta\")\n",

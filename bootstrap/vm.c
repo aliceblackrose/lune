@@ -52,6 +52,20 @@ struct LuneVM {
     void *diagnostic_context;
 };
 
+static bool run_until(
+    LuneVM *vm,
+    LuneValue *result,
+    size_t stop_depth
+);
+
+static bool invoke_callable(
+    LuneVM *vm,
+    LuneValue callee,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+);
+
 static bool runtime_error(
     LuneVM *vm,
     LuneSpan span,
@@ -2277,6 +2291,319 @@ static bool native_format(
     return ok;
 }
 
+static bool native_each(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *items =
+        as_list(args[0]);
+
+    if (items == NULL) {
+        return native_error(
+            vm,
+            "each() expects a list and a function"
+        );
+    }
+
+    for (
+        size_t i = 0;
+        i < items->count;
+        i++
+    ) {
+        LuneValue call_result =
+            lune_value_null();
+
+        if (!invoke_callable(
+            vm,
+            args[1],
+            1,
+            &items->items[i],
+            &call_result
+        )) {
+            return false;
+        }
+
+        if (vm->exit_requested) {
+            *result = lune_value_null();
+            return true;
+        }
+    }
+
+    *result = args[0];
+    return true;
+}
+
+static bool native_map(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *items =
+        as_list(args[0]);
+
+    if (items == NULL) {
+        return native_error(
+            vm,
+            "map() expects a list and a function"
+        );
+    }
+
+    if (
+        items->count >
+        SIZE_MAX /
+            sizeof(LuneValue)
+    ) {
+        return native_error(
+            vm,
+            "map() result is too large"
+        );
+    }
+
+    LuneValue *empty = NULL;
+
+    if (items->count > 0) {
+        empty = calloc(
+            items->count,
+            sizeof(*empty)
+        );
+
+        if (empty == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+    }
+
+    LuneObjList *mapped =
+        lune_list_new(
+            &vm->heap,
+            empty,
+            items->count
+        );
+
+    free(empty);
+
+    if (mapped == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    LuneValue mapped_value =
+        lune_value_obj(
+            (LuneObj *)mapped
+        );
+
+    if (!push(
+        vm,
+        mapped_value,
+        vm->native_span
+    )) {
+        return false;
+    }
+
+    for (
+        size_t i = 0;
+        i < items->count;
+        i++
+    ) {
+        LuneValue call_result =
+            lune_value_null();
+
+        if (!invoke_callable(
+            vm,
+            args[1],
+            1,
+            &items->items[i],
+            &call_result
+        )) {
+            return false;
+        }
+
+        if (vm->exit_requested) {
+            *result = lune_value_null();
+            return true;
+        }
+
+        mapped->items[i] =
+            call_result;
+    }
+
+    LuneValue rooted;
+
+    if (!pop(
+        vm,
+        &rooted,
+        vm->native_span
+    )) {
+        return false;
+    }
+
+    *result = rooted;
+    return true;
+}
+
+static bool native_filter(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *items =
+        as_list(args[0]);
+
+    if (items == NULL) {
+        return native_error(
+            vm,
+            "filter() expects a list and a function"
+        );
+    }
+
+    LuneValue *kept = NULL;
+
+    if (items->count > 0) {
+        if (
+            items->count >
+            SIZE_MAX /
+                sizeof(*kept)
+        ) {
+            return native_error(
+                vm,
+                "filter() result is too large"
+            );
+        }
+
+        kept = malloc(
+            items->count *
+            sizeof(*kept)
+        );
+
+        if (kept == NULL) {
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+    }
+
+    size_t kept_count = 0;
+
+    for (
+        size_t i = 0;
+        i < items->count;
+        i++
+    ) {
+        LuneValue predicate =
+            lune_value_null();
+
+        if (!invoke_callable(
+            vm,
+            args[1],
+            1,
+            &items->items[i],
+            &predicate
+        )) {
+            free(kept);
+            return false;
+        }
+
+        if (vm->exit_requested) {
+            free(kept);
+            *result = lune_value_null();
+            return true;
+        }
+
+        if (lune_value_truthy(predicate)) {
+            kept[kept_count++] =
+                items->items[i];
+        }
+    }
+
+    LuneObjList *filtered =
+        lune_list_new(
+            &vm->heap,
+            kept,
+            kept_count
+        );
+
+    free(kept);
+
+    if (filtered == NULL) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    *result = lune_value_obj(
+        (LuneObj *)filtered
+    );
+    return true;
+}
+
+static bool native_reduce(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjList *items =
+        as_list(args[0]);
+
+    if (items == NULL) {
+        return native_error(
+            vm,
+            "reduce() expects a list, initial value, and function"
+        );
+    }
+
+    LuneValue accumulator =
+        args[1];
+
+    for (
+        size_t i = 0;
+        i < items->count;
+        i++
+    ) {
+        LuneValue callback_args[2] = {
+            accumulator,
+            items->items[i],
+        };
+
+        LuneValue next =
+            lune_value_null();
+
+        if (!invoke_callable(
+            vm,
+            args[2],
+            2,
+            callback_args,
+            &next
+        )) {
+            return false;
+        }
+
+        if (vm->exit_requested) {
+            *result = lune_value_null();
+            return true;
+        }
+
+        accumulator = next;
+    }
+
+    *result = accumulator;
+    return true;
+}
+
 static bool native_env(
     LuneVM *vm,
     int argc,
@@ -3314,6 +3641,131 @@ static bool call_value(
     );
 }
 
+static bool invoke_callable(
+    LuneVM *vm,
+    LuneValue callee,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    if (
+        argc < 0 ||
+        argc > (int)UINT16_MAX
+    ) {
+        return native_error(
+            vm,
+            "callback has too many arguments"
+        );
+    }
+
+    size_t base_stack =
+        vm->stack_count;
+    size_t base_depth =
+        vm->frame_count;
+    LuneSpan saved_span =
+        vm->native_span;
+
+    if (!push(
+        vm,
+        callee,
+        saved_span
+    )) {
+        return false;
+    }
+
+    for (
+        int i = 0;
+        i < argc;
+        i++
+    ) {
+        if (!push(
+            vm,
+            args[i],
+            saved_span
+        )) {
+            vm->stack_count =
+                base_stack;
+            return false;
+        }
+    }
+
+    if (!call_value(
+        vm,
+        (uint16_t)argc,
+        saved_span
+    )) {
+        vm->stack_count =
+            base_stack;
+        vm->native_span =
+            saved_span;
+        return false;
+    }
+
+    if (vm->exit_requested) {
+        vm->stack_count =
+            base_stack;
+        vm->native_span =
+            saved_span;
+        *result = lune_value_null();
+        return true;
+    }
+
+    if (
+        vm->frame_count >
+        base_depth
+    ) {
+        LuneValue call_result =
+            lune_value_null();
+
+        if (!run_until(
+            vm,
+            &call_result,
+            base_depth
+        )) {
+            vm->stack_count =
+                base_stack;
+            vm->native_span =
+                saved_span;
+            return false;
+        }
+
+        vm->native_span =
+            saved_span;
+
+        if (vm->exit_requested) {
+            vm->stack_count =
+                base_stack;
+            *result =
+                lune_value_null();
+            return true;
+        }
+
+        vm->stack_count =
+            base_stack;
+        *result = call_result;
+        return true;
+    }
+
+    LuneValue call_result;
+
+    if (!pop(
+        vm,
+        &call_result,
+        saved_span
+    )) {
+        vm->native_span =
+            saved_span;
+        return false;
+    }
+
+    vm->stack_count =
+        base_stack;
+    vm->native_span =
+        saved_span;
+    *result = call_result;
+    return true;
+}
+
 LuneVM *lune_vm_new(
     LuneDiagnosticFn diagnostic,
     void *diagnostic_context
@@ -3494,6 +3946,22 @@ static bool prepare_run(
             native_format
         ) ||
         !define_native(
+            vm, "each", 2,
+            native_each
+        ) ||
+        !define_native(
+            vm, "map", 2,
+            native_map
+        ) ||
+        !define_native(
+            vm, "filter", 2,
+            native_filter
+        ) ||
+        !define_native(
+            vm, "reduce", 3,
+            native_reduce
+        ) ||
+        !define_native(
             vm, "env", 1, native_env
         ) ||
         !define_native(
@@ -3542,21 +4010,11 @@ static bool prepare_run(
     return true;
 }
 
-bool lune_vm_run(
+static bool run_until(
     LuneVM *vm,
-    const LuneChunk *chunk,
-    LuneValue *result
+    LuneValue *result,
+    size_t stop_depth
 ) {
-    if (!prepare_run(
-        vm, chunk
-    )) {
-        return runtime_error(
-            vm,
-            (LuneSpan){0},
-            "out of memory"
-        );
-    }
-
     for (;;) {
         CallFrame *frame =
             current_frame(vm);
@@ -4597,13 +5055,16 @@ bool lune_vm_run(
 
                 if (
                     vm->frame_count ==
-                    1
+                    stop_depth + 1
                 ) {
+                    vm->frame_count--;
                     vm->stack_count =
                         stack_base;
 
-                    vm->last_result = a;
-                    vm->has_result = true;
+                    if (stop_depth == 0) {
+                        vm->last_result = a;
+                        vm->has_result = true;
+                    }
 
                     if (
                         result != NULL
@@ -4635,4 +5096,26 @@ bool lune_vm_run(
                 );
         }
     }
+}
+
+bool lune_vm_run(
+    LuneVM *vm,
+    const LuneChunk *chunk,
+    LuneValue *result
+) {
+    if (!prepare_run(
+        vm, chunk
+    )) {
+        return runtime_error(
+            vm,
+            (LuneSpan){0},
+            "out of memory"
+        );
+    }
+
+    return run_until(
+        vm,
+        result,
+        0
+    );
 }
