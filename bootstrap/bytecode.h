@@ -13,12 +13,19 @@ typedef enum {
     LUNE_OP_NULL,
     LUNE_OP_TRUE,
     LUNE_OP_FALSE,
+    LUNE_OP_STRING,
+    LUNE_OP_LIST,
+    LUNE_OP_MAP,
     LUNE_OP_POP,
     LUNE_OP_GET_LOCAL,
     LUNE_OP_SET_LOCAL,
     LUNE_OP_GET_GLOBAL,
     LUNE_OP_DEFINE_GLOBAL,
     LUNE_OP_SET_GLOBAL,
+    LUNE_OP_GET_INDEX,
+    LUNE_OP_SET_INDEX,
+    LUNE_OP_GET_FIELD,
+    LUNE_OP_SET_FIELD,
     LUNE_OP_ADD,
     LUNE_OP_SUBTRACT,
     LUNE_OP_MULTIPLY,
@@ -48,9 +55,11 @@ typedef struct {
     LuneSpan *spans;
     size_t count;
     size_t capacity;
+
     LuneValue *constants;
     size_t constants_count;
     size_t constants_capacity;
+
     LuneName *names;
     size_t names_count;
     size_t names_capacity;
@@ -59,8 +68,17 @@ typedef struct {
 void lune_chunk_init(LuneChunk *chunk);
 void lune_chunk_free(LuneChunk *chunk);
 bool lune_chunk_write(LuneChunk *chunk, uint8_t byte, LuneSpan span);
-bool lune_chunk_add_constant(LuneChunk *chunk, LuneValue value, uint16_t *index);
-bool lune_chunk_intern_name(LuneChunk *chunk, const char *chars, size_t length, uint16_t *index);
+bool lune_chunk_add_constant(
+    LuneChunk *chunk,
+    LuneValue value,
+    uint16_t *index
+);
+bool lune_chunk_intern_name(
+    LuneChunk *chunk,
+    const char *chars,
+    size_t length,
+    uint16_t *index
+);
 const char *lune_opcode_name(LuneOpcode opcode);
 
 #endif
