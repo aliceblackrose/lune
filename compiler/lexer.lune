@@ -1,0 +1,351 @@
+// Self-hosted Lune lexer.
+//
+// The bootstrap C lexer remains the source frontend until the rest of the
+// compiler is ported. This module deliberately uses only ordinary Lune
+// runtime facilities so it can become the production lexer later.
+
+keywords := {
+    "fn": "FN",
+    "if": "IF",
+    "else": "ELSE",
+    "while": "WHILE",
+    "true": "TRUE",
+    "false": "FALSE",
+    "null": "NULL",
+    "and": "AND",
+    "or": "OR",
+    "not": "NOT",
+}
+
+is_digit := fn(c) =>
+    c >= 48 and c <= 57
+
+is_alpha := fn(c) =>
+    (c >= 97 and c <= 122) or
+    (c >= 65 and c <= 90) or
+    c == 95
+
+is_hex := fn(c) =>
+    is_digit(c) or
+    (c >= 97 and c <= 102) or
+    (c >= 65 and c <= 70)
+
+lex := fn(source) => {
+    tokens := []
+    errors := []
+
+    size := len(source)
+    offset := 0
+    line := 1
+    column := 1
+
+    peek := fn() =>
+        if offset >= size {
+            -1
+        } else {
+            byte_at(source, offset)
+        }
+
+    peek_next := fn() =>
+        if offset + 1 >= size {
+            -1
+        } else {
+            byte_at(source, offset + 1)
+        }
+
+    advance := fn() => {
+        c := byte_at(source, offset)
+        offset = offset + 1
+
+        if c == 10 {
+            line = line + 1
+            column = 1
+        } else {
+            column = column + 1
+        }
+
+        c
+    }
+
+    match_byte := fn(expected) =>
+        if peek() == expected {
+            advance()
+            true
+        } else {
+            false
+        }
+
+    emit := fn(kind, start, start_line, start_column) => {
+        push(tokens, {
+            kind: kind,
+            start: start,
+            length: offset - start,
+            line: start_line,
+            column: start_column,
+        })
+        null
+    }
+
+    diagnostic := fn(message, start, length, error_line, error_column) => {
+        push(errors, {
+            message: message,
+            start: start,
+            length: length,
+            line: error_line,
+            column: error_column,
+        })
+        null
+    }
+
+    emit_unexpected := fn(start, start_line, start_column) => {
+        diagnostic(
+            "unexpected character",
+            start,
+            offset - start,
+            start_line,
+            start_column
+        )
+        emit("ERROR", start, start_line, start_column)
+    }
+
+    lex_string := fn(start, start_line, start_column) => {
+        valid := true
+        terminated := false
+        scanning := true
+
+        while scanning and offset < size {
+            c := peek()
+
+            if c == 34 {
+                advance()
+                terminated = true
+                scanning = false
+            } else if c == 10 or c == 13 {
+                scanning = false
+            } else if c == 92 {
+                advance()
+
+                if offset >= size {
+                    scanning = false
+                } else {
+                    escape := advance()
+
+                    if (
+                        escape == 34 or
+                        escape == 92 or
+                        escape == 110 or
+                        escape == 114 or
+                        escape == 116 or
+                        escape == 48
+                    ) {
+                        null
+                    } else if escape == 117 {
+                        escape_start := offset - 1
+                        escape_line := line
+                        escape_column := column - 1
+
+                        if not match_byte(123) {
+                            valid = false
+                            diagnostic(
+                                "invalid string escape",
+                                escape_start,
+                                1,
+                                escape_line,
+                                escape_column
+                            )
+                        } else {
+                            digits := 0
+
+                            while is_hex(peek()) {
+                                advance()
+                                digits = digits + 1
+                            }
+
+                            if digits == 0 {
+                                valid = false
+                                diagnostic(
+                                    "invalid string escape",
+                                    escape_start,
+                                    offset - escape_start,
+                                    escape_line,
+                                    escape_column
+                                )
+                            }
+
+                            if not match_byte(125) {
+                                valid = false
+                                diagnostic(
+                                    "invalid string escape",
+                                    escape_start,
+                                    offset - escape_start,
+                                    escape_line,
+                                    escape_column
+                                )
+                            }
+                        }
+                    } else {
+                        valid = false
+                        diagnostic(
+                            "invalid string escape",
+                            offset - 1,
+                            1,
+                            line,
+                            column - 1
+                        )
+                    }
+                }
+            } else {
+                advance()
+            }
+        }
+
+        if not terminated {
+            valid = false
+            diagnostic(
+                "unterminated string",
+                start,
+                offset - start,
+                start_line,
+                start_column
+            )
+        }
+
+        kind := if valid {
+            "STRING"
+        } else {
+            "ERROR"
+        }
+
+        emit(kind, start, start_line, start_column)
+        null
+    }
+
+    while offset < size {
+        c := peek()
+
+        if c == 32 or c == 9 or c == 11 or c == 12 {
+            advance()
+        } else if c == 47 and peek_next() == 47 {
+            while offset < size and peek() != 10 {
+                advance()
+            }
+        } else {
+            start := offset
+            start_line := line
+            start_column := column
+            c = advance()
+
+            if c == 10 {
+                emit("NEWLINE", start, start_line, start_column)
+            } else if c == 13 {
+                if match_byte(10) {
+                    emit("NEWLINE", start, start_line, start_column)
+                } else {
+                    emit_unexpected(start, start_line, start_column)
+                }
+            } else if is_alpha(c) {
+                while is_alpha(peek()) or is_digit(peek()) {
+                    advance()
+                }
+
+                text := slice(source, start, offset)
+                keyword := keywords[text]
+                kind := keyword or "IDENTIFIER"
+                emit(kind, start, start_line, start_column)
+            } else if is_digit(c) {
+                while is_digit(peek()) {
+                    advance()
+                }
+
+                if peek() == 46 and is_digit(peek_next()) {
+                    advance()
+
+                    while is_digit(peek()) {
+                        advance()
+                    }
+                }
+
+                emit("NUMBER", start, start_line, start_column)
+            } else if c == 34 {
+                lex_string(start, start_line, start_column)
+            } else if c == 58 {
+                if match_byte(61) {
+                    emit("DECLARE", start, start_line, start_column)
+                } else {
+                    emit("COLON", start, start_line, start_column)
+                }
+            } else if c == 61 {
+                if match_byte(62) {
+                    emit("ARROW", start, start_line, start_column)
+                } else if match_byte(61) {
+                    emit("EQ", start, start_line, start_column)
+                } else {
+                    emit("ASSIGN", start, start_line, start_column)
+                }
+            } else if c == 33 {
+                if match_byte(61) {
+                    emit("NE", start, start_line, start_column)
+                } else {
+                    emit_unexpected(start, start_line, start_column)
+                }
+            } else if c == 60 {
+                if match_byte(61) {
+                    emit("LE", start, start_line, start_column)
+                } else {
+                    emit("LT", start, start_line, start_column)
+                }
+            } else if c == 62 {
+                if match_byte(61) {
+                    emit("GE", start, start_line, start_column)
+                } else {
+                    emit("GT", start, start_line, start_column)
+                }
+            } else if c == 43 {
+                emit("PLUS", start, start_line, start_column)
+            } else if c == 45 {
+                emit("MINUS", start, start_line, start_column)
+            } else if c == 42 {
+                emit("STAR", start, start_line, start_column)
+            } else if c == 47 {
+                emit("SLASH", start, start_line, start_column)
+            } else if c == 37 {
+                emit("PERCENT", start, start_line, start_column)
+            } else if c == 40 {
+                emit("LPAREN", start, start_line, start_column)
+            } else if c == 41 {
+                emit("RPAREN", start, start_line, start_column)
+            } else if c == 123 {
+                emit("LBRACE", start, start_line, start_column)
+            } else if c == 125 {
+                emit("RBRACE", start, start_line, start_column)
+            } else if c == 91 {
+                emit("LBRACK", start, start_line, start_column)
+            } else if c == 93 {
+                emit("RBRACK", start, start_line, start_column)
+            } else if c == 44 {
+                emit("COMMA", start, start_line, start_column)
+            } else if c == 46 {
+                emit("DOT", start, start_line, start_column)
+            } else {
+                emit_unexpected(start, start_line, start_column)
+            }
+        }
+    }
+
+    push(tokens, {
+        kind: "EOF",
+        start: offset,
+        length: 0,
+        line: line,
+        column: column,
+    })
+
+    {
+        tokens: tokens,
+        errors: errors,
+    }
+}
+
+{
+    lex: lex,
+}

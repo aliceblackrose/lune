@@ -1,0 +1,98 @@
+lexer := import("./lexer")
+
+assert := fn(condition, message) =>
+    if condition {
+        null
+    } else {
+        print("self-hosted lexer test failed:", message)
+        exit(1)
+    }
+
+result := lexer.lex("x := 1 + 2 * 3\n")
+
+assert(len(result.errors) == 0, "basic source has no errors")
+assert(len(result.tokens) == 9, "basic token count")
+assert(result.tokens[0].kind == "IDENTIFIER", "identifier token")
+assert(result.tokens[1].kind == "DECLARE", "declare token")
+assert(result.tokens[3].kind == "PLUS", "plus token")
+assert(result.tokens[5].kind == "STAR", "star token")
+assert(result.tokens[7].kind == "NEWLINE", "newline token")
+assert(result.tokens[8].kind == "EOF", "eof token")
+
+keywords := lexer.lex(
+    "fn if else while true false null and or not\n"
+)
+
+assert(keywords.tokens[0].kind == "FN", "fn keyword")
+assert(keywords.tokens[1].kind == "IF", "if keyword")
+assert(keywords.tokens[2].kind == "ELSE", "else keyword")
+assert(keywords.tokens[3].kind == "WHILE", "while keyword")
+assert(keywords.tokens[4].kind == "TRUE", "true keyword")
+assert(keywords.tokens[9].kind == "NOT", "not keyword")
+
+comments := lexer.lex("a // ignored\nb\n")
+
+assert(len(comments.errors) == 0, "comments have no errors")
+assert(comments.tokens[0].kind == "IDENTIFIER", "comment lhs")
+assert(comments.tokens[1].kind == "NEWLINE", "comment preserves newline")
+assert(comments.tokens[2].kind == "IDENTIFIER", "comment rhs")
+
+numbers := lexer.lex("12 3.5 1.foo\n")
+
+assert(numbers.tokens[0].kind == "NUMBER", "integer number")
+assert(numbers.tokens[1].kind == "NUMBER", "float number")
+assert(numbers.tokens[2].kind == "NUMBER", "number before dot")
+assert(numbers.tokens[3].kind == "DOT", "dot after integer")
+assert(numbers.tokens[4].kind == "IDENTIFIER", "member after dot")
+
+strings := lexer.lex("\"hello\\n\\u{1F680}\"\n")
+
+assert(len(strings.errors) == 0, "valid string escapes")
+assert(strings.tokens[0].kind == "STRING", "string token")
+
+bad_escape := lexer.lex("\"bad\\q\"\n")
+
+assert(len(bad_escape.errors) == 1, "invalid escape diagnostic")
+assert(bad_escape.tokens[0].kind == "ERROR", "invalid string token")
+
+unterminated := lexer.lex("\"nope\nnext\n")
+
+assert(len(unterminated.errors) == 1, "unterminated diagnostic")
+assert(unterminated.tokens[0].kind == "ERROR", "unterminated error token")
+assert(unterminated.tokens[1].kind == "NEWLINE", "unterminated leaves newline")
+
+crlf := lexer.lex("a\r\nb\r\n")
+
+assert(crlf.tokens[1].kind == "NEWLINE", "crlf newline")
+assert(crlf.tokens[2].line == 2, "crlf line tracking")
+assert(crlf.tokens[2].column == 1, "crlf column tracking")
+
+operators := lexer.lex(
+    ": := = => == != < <= > >= + - * / % " +
+    "() {} [] , .\n"
+)
+
+assert(len(operators.errors) == 0, "operator source")
+assert(operators.tokens[0].kind == "COLON", "colon")
+assert(operators.tokens[1].kind == "DECLARE", "declare operator")
+assert(operators.tokens[2].kind == "ASSIGN", "assign operator")
+assert(operators.tokens[3].kind == "ARROW", "arrow operator")
+assert(operators.tokens[4].kind == "EQ", "equality operator")
+assert(operators.tokens[5].kind == "NE", "inequality operator")
+assert(operators.tokens[6].kind == "LT", "less operator")
+assert(operators.tokens[7].kind == "LE", "less equal operator")
+assert(operators.tokens[8].kind == "GT", "greater operator")
+assert(operators.tokens[9].kind == "GE", "greater equal operator")
+
+unexpected := lexer.lex(";\n")
+
+assert(len(unexpected.errors) == 1, "unexpected character diagnostic")
+assert(unexpected.tokens[0].kind == "ERROR", "unexpected error token")
+
+span := lexer.lex("\n  hello\n")
+assert(span.tokens[1].start == 3, "identifier byte offset")
+assert(span.tokens[1].length == 5, "identifier length")
+assert(span.tokens[1].line == 2, "identifier line")
+assert(span.tokens[1].column == 3, "identifier column")
+
+print("self-hosted lexer tests passed")
