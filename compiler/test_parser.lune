@@ -1,0 +1,111 @@
+parser := import("./parser")
+
+assert := fn(condition, message) =>
+    if condition {
+        null
+    } else {
+        print("self-hosted parser test failed:", message)
+        exit(1)
+    }
+
+basic := parser.parse("x := 1 + 2 * 3\n")
+
+assert(len(basic.errors) == 0, "basic parse errors")
+assert(len(basic.ast.statements) == 1, "basic statement count")
+
+decl := basic.ast.statements[0]
+assert(decl.kind == "Declare", "declaration node")
+assert(decl.value.kind == "Binary", "addition node")
+assert(decl.value.op == "PLUS", "addition operator")
+assert(decl.value.right.kind == "Binary", "multiplication rhs")
+assert(decl.value.right.op == "STAR", "multiplication precedence")
+
+postfix := parser.parse(
+    "x := factory()(value).items[0]\n"
+)
+
+assert(len(postfix.errors) == 0, "postfix parse errors")
+value := postfix.ast.statements[0].value
+assert(value.kind == "Index", "index outer node")
+assert(value.object.kind == "Member", "member before index")
+assert(value.object.object.kind == "Call", "call before member")
+
+function := parser.parse(
+    "make := fn(start) => {\n" +
+    "  n := start\n" +
+    "  fn() => {\n" +
+    "    n = n + 1\n" +
+    "    n\n" +
+    "  }\n" +
+    "}\n"
+)
+
+assert(len(function.errors) == 0, "function parse errors")
+assert(
+    function.ast.statements[0].value.kind == "Function",
+    "function node"
+)
+assert(
+    function.ast.statements[0].value.body.kind == "Block",
+    "function block body"
+)
+
+control := parser.parse(
+    "n := 3\n" +
+    "while n > 0 {\n" +
+    "  n = n - 1\n" +
+    "}\n" +
+    "label := if n == 0 {\n" +
+    "  \"done\"\n" +
+    "} else {\n" +
+    "  \"other\"\n" +
+    "}\n"
+)
+
+assert(len(control.errors) == 0, "control flow parse errors")
+assert(control.ast.statements[1].kind == "While", "while node")
+assert(
+    control.ast.statements[2].value.kind == "If",
+    "if expression node"
+)
+
+collections := parser.parse(
+    "x := {\n" +
+    "  name: \"Lune\",\n" +
+    "  values: [1, 2, 3,],\n" +
+    "}\n"
+)
+
+assert(len(collections.errors) == 0, "collection parse errors")
+assert(collections.ast.statements[0].value.kind == "Map", "map node")
+assert(
+    collections.ast.statements[0].value.entries[1].value.kind == "List",
+    "nested list node"
+)
+
+assignment := parser.parse("(x + 1) = 2\n")
+assert(len(assignment.errors) > 0, "invalid assignment target")
+
+recovery := parser.parse(
+    "x :=\n" +
+    "y :=\n" +
+    "z := 1\n"
+)
+
+assert(len(recovery.errors) >= 2, "multiple diagnostics")
+assert(len(recovery.ast.statements) == 1, "recovered statement")
+assert(recovery.ast.statements[0].kind == "Declare", "recovered declaration")
+
+multiline := parser.parse(
+    "value := 1 +\n" +
+    "  2 *\n" +
+    "  3\n"
+)
+
+assert(len(multiline.errors) == 0, "multiline expression")
+assert(
+    multiline.ast.statements[0].value.right.kind == "Binary",
+    "multiline precedence"
+)
+
+print("self-hosted parser tests passed")

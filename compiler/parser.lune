@@ -1,0 +1,758 @@
+lexer := import("./lexer")
+
+token_span := fn(token) => {
+    start: token.start,
+    length: token.length,
+    line: token.line,
+    column: token.column,
+}
+
+merge_span := fn(left, right) => {
+    start: left.start,
+    length: right.start + right.length - left.start,
+    line: left.line,
+    column: left.column,
+}
+
+infix_bp := fn(kind) =>
+    if kind == "OR" {
+        1
+    } else if kind == "AND" {
+        3
+    } else if kind == "EQ" or kind == "NE" {
+        5
+    } else if (
+        kind == "LT" or
+        kind == "LE" or
+        kind == "GT" or
+        kind == "GE"
+    ) {
+        7
+    } else if kind == "PLUS" or kind == "MINUS" {
+        9
+    } else if (
+        kind == "STAR" or
+        kind == "SLASH" or
+        kind == "PERCENT"
+    ) {
+        11
+    } else {
+        -1
+    }
+
+parse := fn(source) => {
+    scanned := lexer.lex(source)
+    tokens := scanned.tokens
+    errors := []
+
+    copy_error := 0
+    while copy_error < len(scanned.errors) {
+        push(errors, scanned.errors[copy_error])
+        copy_error = copy_error + 1
+    }
+
+    index := 0
+
+    current := fn() => tokens[index]
+
+    next_token := fn() =>
+        if index + 1 < len(tokens) {
+            tokens[index + 1]
+        } else {
+            tokens[len(tokens) - 1]
+        }
+
+    advance := fn() => {
+        token := current()
+
+        if index + 1 < len(tokens) {
+            index = index + 1
+        }
+
+        token
+    }
+
+    match := fn(kind) =>
+        if current().kind == kind {
+            advance()
+            true
+        } else {
+            false
+        }
+
+    diagnostic := fn(token, message) => {
+        push(errors, {
+            message: message,
+            start: token.start,
+            length: token.length,
+            line: token.line,
+            column: token.column,
+        })
+        null
+    }
+
+    expect := fn(kind, message) =>
+        if current().kind == kind {
+            advance()
+            true
+        } else {
+            diagnostic(current(), message)
+            false
+        }
+
+    skip_newlines := fn() => {
+        while match("NEWLINE") {
+            null
+        }
+        null
+    }
+
+    synchronize := fn() => {
+        while (
+            current().kind != "EOF" and
+            current().kind != "NEWLINE" and
+            current().kind != "RBRACE"
+        ) {
+            advance()
+        }
+        null
+    }
+
+    assignable := fn(node) =>
+        node != null and (
+            node.kind == "Name" or
+            node.kind == "Index" or
+            node.kind == "Member"
+        )
+
+    parse_expression_bp := null
+    parse_statement := null
+    parse_block := null
+    parse_if := null
+    parse_function := null
+    parse_list := null
+    parse_map := null
+    parse_prefix := null
+    finish_call := null
+    finish_index := null
+    finish_member := null
+
+    parse_list = fn() => {
+        open := advance()
+        skip_newlines()
+
+        elements := []
+        failed := false
+        done := current().kind == "RBRACK"
+
+        while not done and not failed {
+            element := parse_expression_bp(0)
+
+            if element == null {
+                failed = true
+            } else {
+                push(elements, element)
+                skip_newlines()
+
+                if match("COMMA") {
+                    skip_newlines()
+
+                    if current().kind == "RBRACK" {
+                        done = true
+                    }
+                } else {
+                    done = true
+                }
+            }
+        }
+
+        close := current()
+        closed := expect("RBRACK", "expected ']' after list")
+
+        if failed or not closed {
+            null
+        } else {
+            {
+                kind: "List",
+                span: merge_span(token_span(open), token_span(close)),
+                elements: elements,
+            }
+        }
+    }
+
+    parse_map = fn() => {
+        open := advance()
+        skip_newlines()
+
+        entries := []
+        failed := false
+        done := current().kind == "RBRACE"
+
+        while not done and not failed {
+            key := current()
+            quoted := key.kind == "STRING"
+
+            if key.kind != "IDENTIFIER" and not quoted {
+                diagnostic(key, "expected map key")
+                failed = true
+            } else {
+                advance()
+                skip_newlines()
+
+                if not expect("COLON", "expected ':' after map key") {
+                    failed = true
+                } else {
+                    skip_newlines()
+                    value := parse_expression_bp(0)
+
+                    if value == null {
+                        failed = true
+                    } else {
+                        push(entries, {
+                            key: key,
+                            quoted: quoted,
+                            value: value,
+                        })
+
+                        skip_newlines()
+
+                        if match("COMMA") {
+                            skip_newlines()
+
+                            if current().kind == "RBRACE" {
+                                done = true
+                            }
+                        } else {
+                            done = true
+                        }
+                    }
+                }
+            }
+        }
+
+        close := current()
+        closed := expect("RBRACE", "expected '}' after map")
+
+        if failed or not closed {
+            null
+        } else {
+            {
+                kind: "Map",
+                span: merge_span(token_span(open), token_span(close)),
+                entries: entries,
+            }
+        }
+    }
+
+    parse_function = fn() => {
+        start := advance()
+        failed := not expect("LPAREN", "expected '(' after 'fn'")
+        skip_newlines()
+
+        parameters := []
+        done := current().kind == "RPAREN"
+
+        while not done and not failed {
+            parameter := current()
+
+            if parameter.kind != "IDENTIFIER" {
+                diagnostic(parameter, "expected parameter name")
+                failed = true
+            } else {
+                push(parameters, parameter)
+                advance()
+                skip_newlines()
+
+                if match("COMMA") {
+                    skip_newlines()
+
+                    if current().kind == "RPAREN" {
+                        done = true
+                    }
+                } else {
+                    done = true
+                }
+            }
+        }
+
+        if not failed and not expect(
+            "RPAREN",
+            "expected ')' after parameters"
+        ) {
+            failed = true
+        }
+
+        if not failed and not expect(
+            "ARROW",
+            "expected '=>' after function parameters"
+        ) {
+            failed = true
+        }
+
+        skip_newlines()
+
+        body := if failed {
+            null
+        } else if current().kind == "LBRACE" {
+            parse_block()
+        } else {
+            parse_expression_bp(0)
+        }
+
+        if failed or body == null {
+            null
+        } else {
+            {
+                kind: "Function",
+                span: merge_span(token_span(start), body.span),
+                parameters: parameters,
+                body: body,
+            }
+        }
+    }
+
+    parse_if = fn() => {
+        start := advance()
+        condition := parse_expression_bp(0)
+
+        if condition == null {
+            null
+        } else {
+            skip_newlines()
+
+            then_branch := if current().kind == "LBRACE" {
+                parse_block()
+            } else {
+                diagnostic(current(), "expected block after if condition")
+                null
+            }
+
+            if then_branch == null {
+                null
+            } else {
+                else_branch := null
+                valid := true
+
+                if match("ELSE") {
+                    if current().kind == "IF" {
+                        else_branch = parse_if()
+                    } else if current().kind == "LBRACE" {
+                        else_branch = parse_block()
+                    } else {
+                        diagnostic(
+                            current(),
+                            "expected 'if' or block after 'else'"
+                        )
+                        valid = false
+                    }
+
+                    if else_branch == null {
+                        valid = false
+                    }
+                }
+
+                if not valid {
+                    null
+                } else {
+                    last_span := if else_branch == null {
+                        then_branch.span
+                    } else {
+                        else_branch.span
+                    }
+
+                    {
+                        kind: "If",
+                        span: merge_span(token_span(start), last_span),
+                        condition: condition,
+                        then_branch: then_branch,
+                        else_branch: else_branch,
+                    }
+                }
+            }
+        }
+    }
+
+    parse_prefix = fn() => {
+        token := current()
+
+        if token.kind == "NULL" {
+            advance()
+            {
+                kind: "Null",
+                span: token_span(token),
+            }
+        } else if token.kind == "TRUE" or token.kind == "FALSE" {
+            advance()
+            {
+                kind: "Bool",
+                span: token_span(token),
+                value: token.kind == "TRUE",
+            }
+        } else if token.kind == "NUMBER" {
+            advance()
+            {
+                kind: "Number",
+                span: token_span(token),
+                token: token,
+            }
+        } else if token.kind == "STRING" {
+            advance()
+            {
+                kind: "String",
+                span: token_span(token),
+                token: token,
+            }
+        } else if token.kind == "IDENTIFIER" {
+            advance()
+            {
+                kind: "Name",
+                span: token_span(token),
+                token: token,
+            }
+        } else if token.kind == "MINUS" or token.kind == "NOT" {
+            advance()
+            skip_newlines()
+            operand := parse_expression_bp(13)
+
+            if operand == null {
+                null
+            } else {
+                {
+                    kind: "Unary",
+                    span: merge_span(token_span(token), operand.span),
+                    op: token.kind,
+                    operand: operand,
+                }
+            }
+        } else if token.kind == "LPAREN" {
+            advance()
+            skip_newlines()
+            expression := parse_expression_bp(0)
+            skip_newlines()
+
+            if not expect("RPAREN", "expected ')' after expression") {
+                null
+            } else {
+                expression
+            }
+        } else if token.kind == "LBRACK" {
+            parse_list()
+        } else if token.kind == "LBRACE" {
+            parse_map()
+        } else if token.kind == "FN" {
+            parse_function()
+        } else if token.kind == "IF" {
+            parse_if()
+        } else if token.kind == "ERROR" {
+            advance()
+            null
+        } else {
+            diagnostic(token, "expected expression")
+            null
+        }
+    }
+
+    finish_call = fn(callee) => {
+        advance()
+        skip_newlines()
+
+        arguments := []
+        failed := false
+        done := current().kind == "RPAREN"
+
+        while not done and not failed {
+            argument := parse_expression_bp(0)
+
+            if argument == null {
+                failed = true
+            } else {
+                push(arguments, argument)
+                skip_newlines()
+
+                if match("COMMA") {
+                    skip_newlines()
+
+                    if current().kind == "RPAREN" {
+                        done = true
+                    }
+                } else {
+                    done = true
+                }
+            }
+        }
+
+        close := current()
+        closed := expect("RPAREN", "expected ')' after arguments")
+
+        if failed or not closed {
+            null
+        } else {
+            {
+                kind: "Call",
+                span: merge_span(callee.span, token_span(close)),
+                callee: callee,
+                arguments: arguments,
+            }
+        }
+    }
+
+    finish_index = fn(object) => {
+        advance()
+        skip_newlines()
+
+        index_expression := parse_expression_bp(0)
+        skip_newlines()
+
+        close := current()
+        closed := expect("RBRACK", "expected ']' after index")
+
+        if index_expression == null or not closed {
+            null
+        } else {
+            {
+                kind: "Index",
+                span: merge_span(object.span, token_span(close)),
+                object: object,
+                index: index_expression,
+            }
+        }
+    }
+
+    finish_member = fn(object) => {
+        advance()
+        name := current()
+
+        if name.kind != "IDENTIFIER" {
+            diagnostic(name, "expected member name after '.'")
+            null
+        } else {
+            advance()
+            {
+                kind: "Member",
+                span: merge_span(object.span, token_span(name)),
+                object: object,
+                name: name,
+            }
+        }
+    }
+
+    parse_expression_bp = fn(min_bp) => {
+        left := parse_prefix()
+        running := left != null
+
+        while running {
+            kind := current().kind
+
+            if kind == "LPAREN" {
+                left = finish_call(left)
+
+                if left == null {
+                    running = false
+                }
+            } else if kind == "LBRACK" {
+                left = finish_index(left)
+
+                if left == null {
+                    running = false
+                }
+            } else if kind == "DOT" {
+                left = finish_member(left)
+
+                if left == null {
+                    running = false
+                }
+            } else {
+                left_bp := infix_bp(kind)
+
+                if left_bp < min_bp {
+                    running = false
+                } else {
+                    op := advance()
+                    skip_newlines()
+                    right := parse_expression_bp(left_bp + 1)
+
+                    if right == null {
+                        left = null
+                        running = false
+                    } else {
+                        left = {
+                            kind: "Binary",
+                            span: merge_span(left.span, right.span),
+                            op: op.kind,
+                            left: left,
+                            right: right,
+                        }
+                    }
+                }
+            }
+        }
+
+        left
+    }
+
+    parse_block = fn() => {
+        open := current()
+
+        if not expect("LBRACE", "expected '{'") {
+            null
+        } else {
+            statements := []
+            skip_newlines()
+
+            while (
+                current().kind != "RBRACE" and
+                current().kind != "EOF"
+            ) {
+                statement := parse_statement()
+
+                if statement != null {
+                    push(statements, statement)
+                }
+
+                if current().kind == "NEWLINE" {
+                    skip_newlines()
+                } else if current().kind != "RBRACE" {
+                    diagnostic(
+                        current(),
+                        "expected newline or '}' after statement"
+                    )
+                    synchronize()
+                    skip_newlines()
+                }
+            }
+
+            close := current()
+
+            if not expect("RBRACE", "expected '}' after block") {
+                null
+            } else {
+                {
+                    kind: "Block",
+                    span: merge_span(token_span(open), token_span(close)),
+                    statements: statements,
+                }
+            }
+        }
+    }
+
+    parse_while := fn() => {
+        start := advance()
+        condition := parse_expression_bp(0)
+
+        if condition == null {
+            null
+        } else {
+            skip_newlines()
+
+            body := if current().kind == "LBRACE" {
+                parse_block()
+            } else {
+                diagnostic(current(), "expected block after while condition")
+                null
+            }
+
+            if body == null {
+                null
+            } else {
+                {
+                    kind: "While",
+                    span: merge_span(token_span(start), body.span),
+                    condition: condition,
+                    body: body,
+                }
+            }
+        }
+    }
+
+    parse_declaration := fn() => {
+        name := advance()
+        advance()
+        value := parse_expression_bp(0)
+
+        if value == null {
+            null
+        } else {
+            {
+                kind: "Declare",
+                span: merge_span(token_span(name), value.span),
+                name: name,
+                value: value,
+            }
+        }
+    }
+
+    parse_statement = fn() => {
+        if current().kind == "WHILE" {
+            parse_while()
+        } else if (
+            current().kind == "IDENTIFIER" and
+            next_token().kind == "DECLARE"
+        ) {
+            parse_declaration()
+        } else {
+            left := parse_expression_bp(0)
+
+            if left == null {
+                null
+            } else if match("ASSIGN") {
+                if not assignable(left) {
+                    diagnostic(left.span, "invalid assignment target")
+                }
+
+                value := parse_expression_bp(0)
+
+                if value == null {
+                    null
+                } else {
+                    {
+                        kind: "Assign",
+                        span: merge_span(left.span, value.span),
+                        target: left,
+                        value: value,
+                    }
+                }
+            } else {
+                left
+            }
+        }
+    }
+
+    skip_newlines()
+
+    statements := []
+    first := current()
+
+    while current().kind != "EOF" {
+        statement := parse_statement()
+
+        if statement != null {
+            push(statements, statement)
+        }
+
+        if current().kind == "NEWLINE" {
+            skip_newlines()
+        } else if current().kind != "EOF" {
+            diagnostic(current(), "expected newline after statement")
+            synchronize()
+            skip_newlines()
+        }
+    }
+
+    eof := current()
+
+    program := {
+        kind: "Program",
+        span: merge_span(token_span(first), token_span(eof)),
+        statements: statements,
+    }
+
+    {
+        ast: program,
+        errors: errors,
+        tokens: tokens,
+    }
+}
+
+{
+    parse: parse,
+}

@@ -1,0 +1,15 @@
+parser := import("./parser")
+
+if len(args) != 1 {
+    print("usage: check_parser.lune FILE")
+    exit(2)
+} else {
+    source := read_file(args[0])
+    result := parser.parse(source)
+
+    if len(result.errors) == 0 {
+        exit(0)
+    } else {
+        exit(1)
+    }
+}
