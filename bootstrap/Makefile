@@ -6,7 +6,7 @@ FRONTEND := lexer.c ast.c parser.c
 RUNTIME := value.c object.c bytecode.c compiler.c vm.c
 COMMON := $(FRONTEND) $(RUNTIME)
 
-.PHONY: all test test-syntax clean
+.PHONY: all test test-syntax test-examples clean
 
 all: $(BUILD)/lune-bootstrap
 
@@ -29,7 +29,10 @@ test-syntax: $(BUILD)/lune-bootstrap
 	@for f in ../tests/syntax/valid/*.lune; do echo "check $$f"; ./$(BUILD)/lune-bootstrap check "$$f" || exit 1; done
 	@for f in ../tests/syntax/invalid/*.lune; do echo "reject $$f"; if ./$(BUILD)/lune-bootstrap check "$$f" >/dev/null 2>&1; then echo "FAIL: expected $$f to fail"; exit 1; fi; done
 
-test: $(BUILD)/test-lexer $(BUILD)/test-parser $(BUILD)/test-vm test-syntax
+test-examples: $(BUILD)/lune-bootstrap
+	@for f in ../examples/*.lune; do echo "run $$f"; ./$(BUILD)/lune-bootstrap run "$$f" || exit 1; done
+
+test: $(BUILD)/test-lexer $(BUILD)/test-parser $(BUILD)/test-vm test-syntax test-examples
 	./$(BUILD)/test-lexer
 	./$(BUILD)/test-parser
 	./$(BUILD)/test-vm

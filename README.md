@@ -26,7 +26,7 @@ make test
 ./bootstrap/build/lune-bootstrap parse examples/hello.lune
 ```
 
-## Executing the current scalar subset
+## Executing Lune
 
 The bootstrap VM currently executes numbers, booleans, null, strings, lists, maps, bindings, arithmetic/comparison, indexing/member access, mutation, short-circuit operators, `if`, and `while`.
 
@@ -35,4 +35,4 @@ The bootstrap VM currently executes numbers, booleans, null, strings, lists, map
 ./bootstrap/build/lune-bootstrap eval examples/scalars.lune
 ```
 
-`eval` prints the script's final value and is intended as a bootstrap/debugging command. Functions, calls, closures, and native functions are still being implemented.
+`eval` prints the script's final value and is intended as a bootstrap/debugging command. Functions, calls, closures/upvalues, and the native `print` function now execute through the bytecode VM.

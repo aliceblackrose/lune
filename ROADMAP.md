@@ -159,7 +159,7 @@ Start with a stack VM unless benchmarks demonstrate a reason to change.
 
 ### Current status
 
-The bytecode VM now executes the scalar core plus strings, lists, maps, indexing/member access, mutation, short-circuiting, `if`, and `while`. Functions/calls, closures/upvalues, and native functions remain intentionally incomplete.
+The bytecode VM executes the complete v0 core: scalar and collection values, lexical bindings, first-class functions, closures/upvalues, native callables, calls, mutation, short-circuiting, `if`, and `while`.
 
 ### Runtime values
 
@@ -170,20 +170,20 @@ The bytecode VM now executes the scalar core plus strings, lists, maps, indexing
 - [x] string
 - [x] list
 - [x] map
-- [ ] function
-- [ ] closure
-- [ ] native function
+- [x] function
+- [x] closure
+- [x] native function
 
 ### VM
 
 - [x] Constant pool.
 - [x] Operand stack.
-- [ ] Call frames.
+- [x] Call frames.
 - [x] Locals.
 - [x] Globals.
 - [x] Jumps.
-- [ ] Function calls.
-- [ ] Closures and upvalues.
+- [x] Function calls.
+- [x] Closures and upvalues.
 - [x] Indexing.
 - [x] Member access.
 - [x] Runtime errors with source locations.
@@ -236,16 +236,16 @@ The exact instruction set is allowed to change while the VM is young.
 ### Compiler
 
 - [x] Compile literals.
-- [ ] Compile expressions.
+- [x] Compile expressions.
 - [x] Compile declarations and assignment.
 - [x] Compile short-circuit operators.
 - [x] Compile conditionals.
 - [x] Compile loops.
-- [ ] Compile functions.
-- [ ] Compile closures.
+- [x] Compile functions.
+- [x] Compile closures.
 - [x] Compile collections.
 
-**Done when:** non-trivial scripts execute exclusively through Lune bytecode.
+**Status:** complete. All repository examples execute through bytecode, and the VM test suite covers functions, recursion, nested closures, shared mutable upvalues, native calls, collections, control flow, and runtime errors.\n\n**Done when:** non-trivial scripts execute exclusively through Lune bytecode.
 
 ---
 
