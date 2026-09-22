@@ -245,7 +245,9 @@ The exact instruction set is allowed to change while the VM is young.
 - [x] Compile closures.
 - [x] Compile collections.
 
-**Status:** complete. All repository examples execute through bytecode, and the VM test suite covers functions, recursion, nested closures, shared mutable upvalues, native calls, collections, control flow, and runtime errors.\n\n**Done when:** non-trivial scripts execute exclusively through Lune bytecode.
+**Status:** complete. All repository examples execute through bytecode, and the VM test suite covers functions, recursion, nested closures, shared mutable upvalues, native calls, collections, control flow, and runtime errors.
+
+**Done when:** non-trivial scripts execute exclusively through Lune bytecode.
 
 ---
 
@@ -284,7 +286,9 @@ Track at least:
 
 Do not add JIT compilation at this stage.
 
-**Status:** complete. The runtime uses tracing mark-and-sweep GC, VM tests run under collect-on-every-allocation stress mode, CI runs ASan/UBSan with leak detection, and `make bench` provides a reproducible performance baseline.\n\n**Done when:** the VM has predictable memory behavior and a reproducible benchmark suite.
+**Status:** complete. The runtime uses tracing mark-and-sweep GC, VM tests run under collect-on-every-allocation stress mode, CI runs ASan/UBSan with leak detection, and `make bench` provides a reproducible performance baseline.
+
+**Done when:** the VM has predictable memory behavior and a reproducible benchmark suite.
 
 ---
 
