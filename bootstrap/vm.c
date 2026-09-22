@@ -15,7 +15,7 @@
 
 #define STACK_MAX 1024
 #define LOCAL_MAX 256
-#define FRAME_MAX 64
+#define FRAME_MAX 256
 
 typedef struct {
     const LuneChunk *chunk;
