@@ -284,15 +284,13 @@ add_local := fn(compiler, name, span) => {
 }
 
 begin_scope := fn(compiler) => {
-    compiler.scope_depth =
-        compiler.scope_depth + 1
+    compiler.scope_depth = compiler.scope_depth + 1
     null
 }
 
 end_scope := fn(compiler) => {
     ending_depth := compiler.scope_depth
-    compiler.scope_depth =
-        compiler.scope_depth - 1
+    compiler.scope_depth = compiler.scope_depth - 1
 
     i := 0
     while i < len(compiler.locals) {
@@ -508,8 +506,7 @@ decode_string := fn(source, token) => {
                 codepoint := 0
 
                 while byte_at(source, i) != 125 {
-                    codepoint =
-                        codepoint * 16 +
+                    codepoint = codepoint * 16 +
                         hex_value(
                             byte_at(source, i)
                         )
@@ -868,8 +865,7 @@ compile_if := fn(compiler, node) => {
 }
 
 compile_while := fn(compiler, node) => {
-    loop_start :=
-        len(compiler.chunk.code)
+    loop_start := len(compiler.chunk.code)
 
     if not compile_node(
         compiler,
