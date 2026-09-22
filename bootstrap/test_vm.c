@@ -899,7 +899,7 @@ int main(void) {
         "{a: 1, b: [true, null, \"x\"]}"
         ")\n",
         "{\"a\":1,\"b\":[true,null,\"x\"]}",
-        29
+        27
     );
 
     expect_int(
