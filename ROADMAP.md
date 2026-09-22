@@ -159,7 +159,7 @@ Start with a stack VM unless benchmarks demonstrate a reason to change.
 
 ### Current status
 
-A scalar bytecode path is executable: null/bool/int/float values, arithmetic/comparison, lexical locals, globals, short-circuiting, `if`, and `while`. Strings, collections, functions/calls, closures, and native functions remain intentionally incomplete.
+The bytecode VM now executes the scalar core plus strings, lists, maps, indexing/member access, mutation, short-circuiting, `if`, and `while`. Functions/calls, closures/upvalues, and native functions remain intentionally incomplete.
 
 ### Runtime values
 
@@ -167,9 +167,9 @@ A scalar bytecode path is executable: null/bool/int/float values, arithmetic/com
 - [x] boolean
 - [x] integer / numeric representation
 - [x] floating-point representation if separate from integers
-- [ ] string
-- [ ] list
-- [ ] map
+- [x] string
+- [x] list
+- [x] map
 - [ ] function
 - [ ] closure
 - [ ] native function
@@ -184,8 +184,8 @@ A scalar bytecode path is executable: null/bool/int/float values, arithmetic/com
 - [x] Jumps.
 - [ ] Function calls.
 - [ ] Closures and upvalues.
-- [ ] Indexing.
-- [ ] Member access.
+- [x] Indexing.
+- [x] Member access.
 - [x] Runtime errors with source locations.
 
 A first instruction set should remain compact, roughly along these lines:
@@ -235,15 +235,15 @@ The exact instruction set is allowed to change while the VM is young.
 
 ### Compiler
 
-- [ ] Compile literals.
+- [x] Compile literals.
 - [ ] Compile expressions.
-- [x] Compile declarations and identifier assignment; collection targets remain with collections.
+- [x] Compile declarations and assignment.
 - [x] Compile short-circuit operators.
 - [x] Compile conditionals.
 - [x] Compile loops.
 - [ ] Compile functions.
 - [ ] Compile closures.
-- [ ] Compile collections.
+- [x] Compile collections.
 
 **Done when:** non-trivial scripts execute exclusively through Lune bytecode.
 

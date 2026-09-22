@@ -1,0 +1,9 @@
+user := {
+    name: "Alice",
+    tags: ["vm", "lune"],
+}
+
+user.tags[0] = "bytecode"
+user.name = user.name + "!"
+
+user.name

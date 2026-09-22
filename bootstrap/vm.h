@@ -5,10 +5,19 @@
 #include "lexer.h"
 #include "value.h"
 
-bool lune_vm_run(
-    const LuneChunk *chunk,
+#include <stdbool.h>
+
+typedef struct LuneVM LuneVM;
+
+LuneVM *lune_vm_new(
     LuneDiagnosticFn diagnostic,
-    void *diagnostic_context,
+    void *diagnostic_context
+);
+void lune_vm_free(LuneVM *vm);
+
+bool lune_vm_run(
+    LuneVM *vm,
+    const LuneChunk *chunk,
     LuneValue *result
 );
 
