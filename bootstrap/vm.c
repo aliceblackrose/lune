@@ -1348,6 +1348,104 @@ static bool native_len(
     );
 }
 
+static bool scalar_text(
+    LuneVM *vm,
+    LuneValue value,
+    char buffer[64],
+    const char **chars,
+    size_t *length
+) {
+    if (
+        value.kind ==
+            LUNE_VALUE_OBJ &&
+        lune_obj_is_string(
+            value.as.object
+        )
+    ) {
+        LuneObjString *string =
+            (LuneObjString *)
+                value.as.object;
+
+        *chars = string->chars;
+        *length = string->length;
+        return true;
+    }
+
+    switch (value.kind) {
+        case LUNE_VALUE_NULL:
+            *chars = "null";
+            *length = 4;
+            return true;
+
+        case LUNE_VALUE_BOOL:
+            *chars = value.as.boolean
+                ? "true"
+                : "false";
+            *length = value.as.boolean
+                ? 4
+                : 5;
+            return true;
+
+        case LUNE_VALUE_INT: {
+            int written = snprintf(
+                buffer,
+                64,
+                "%lld",
+                (long long)
+                    value.as.integer
+            );
+
+            if (
+                written < 0 ||
+                written >= 64
+            ) {
+                return native_error(
+                    vm,
+                    "integer conversion failed"
+                );
+            }
+
+            *chars = buffer;
+            *length = (size_t)written;
+            return true;
+        }
+
+        case LUNE_VALUE_FLOAT: {
+            int written = snprintf(
+                buffer,
+                64,
+                "%.17g",
+                value.as.floating
+            );
+
+            if (
+                written < 0 ||
+                written >= 64
+            ) {
+                return native_error(
+                    vm,
+                    "float conversion failed"
+                );
+            }
+
+            *chars = buffer;
+            *length = (size_t)written;
+            return true;
+        }
+
+        case LUNE_VALUE_OBJ:
+            return native_error(
+                vm,
+                "value cannot be converted to text"
+            );
+    }
+
+    return native_error(
+        vm,
+        "value cannot be converted to text"
+    );
+}
+
 static bool native_str(
     LuneVM *vm,
     int argc,
@@ -1368,76 +1466,17 @@ static bool native_str(
     }
 
     char buffer[64];
-    const char *chars = buffer;
+    const char *chars = NULL;
     size_t length = 0;
 
-    switch (args[0].kind) {
-        case LUNE_VALUE_NULL:
-            chars = "null";
-            length = 4;
-            break;
-
-        case LUNE_VALUE_BOOL:
-            chars = args[0].as.boolean
-                ? "true"
-                : "false";
-            length = args[0].as.boolean
-                ? 4
-                : 5;
-            break;
-
-        case LUNE_VALUE_INT: {
-            int written = snprintf(
-                buffer,
-                sizeof(buffer),
-                "%lld",
-                (long long)
-                    args[0].as.integer
-            );
-
-            if (
-                written < 0 ||
-                (size_t)written >=
-                    sizeof(buffer)
-            ) {
-                return native_error(
-                    vm,
-                    "integer conversion failed"
-                );
-            }
-
-            length = (size_t)written;
-            break;
-        }
-
-        case LUNE_VALUE_FLOAT: {
-            int written = snprintf(
-                buffer,
-                sizeof(buffer),
-                "%.17g",
-                args[0].as.floating
-            );
-
-            if (
-                written < 0 ||
-                (size_t)written >=
-                    sizeof(buffer)
-            ) {
-                return native_error(
-                    vm,
-                    "float conversion failed"
-                );
-            }
-
-            length = (size_t)written;
-            break;
-        }
-
-        case LUNE_VALUE_OBJ:
-            return native_error(
-                vm,
-                "str() only converts scalar values"
-            );
+    if (!scalar_text(
+        vm,
+        args[0],
+        buffer,
+        &chars,
+        &length
+    )) {
+        return false;
     }
 
     return make_string_value(
@@ -2062,6 +2101,175 @@ static bool native_join(
         vm,
         buffer,
         length,
+        result
+    );
+
+    free(buffer);
+    return ok;
+}
+
+static bool native_format(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)argc;
+
+    LuneObjString *template =
+        as_string(args[0]);
+    LuneObjList *values =
+        as_list(args[1]);
+
+    if (
+        template == NULL ||
+        values == NULL
+    ) {
+        return native_error(
+            vm,
+            "format() expects a string template and a list"
+        );
+    }
+
+    size_t output_length = 0;
+    size_t value_index = 0;
+    size_t i = 0;
+
+    while (i < template->length) {
+        if (
+            i + 1 <
+                template->length &&
+            template->chars[i] == '{' &&
+            template->chars[i + 1] == '}'
+        ) {
+            if (
+                value_index >=
+                values->count
+            ) {
+                return native_error(
+                    vm,
+                    "format() has more placeholders than values"
+                );
+            }
+
+            char scalar_buffer[64];
+            const char *chars = NULL;
+            size_t length = 0;
+
+            if (!scalar_text(
+                vm,
+                values->items[
+                    value_index
+                ],
+                scalar_buffer,
+                &chars,
+                &length
+            )) {
+                return false;
+            }
+
+            (void)chars;
+
+            if (
+                length >
+                SIZE_MAX -
+                    output_length
+            ) {
+                return native_error(
+                    vm,
+                    "format() result is too large"
+                );
+            }
+
+            output_length += length;
+            value_index++;
+            i += 2;
+            continue;
+        }
+
+        if (
+            output_length ==
+            SIZE_MAX
+        ) {
+            return native_error(
+                vm,
+                "format() result is too large"
+            );
+        }
+
+        output_length++;
+        i++;
+    }
+
+    if (
+        value_index !=
+        values->count
+    ) {
+        return native_error(
+            vm,
+            "format() has more values than placeholders"
+        );
+    }
+
+    char *buffer =
+        malloc(output_length);
+
+    if (
+        buffer == NULL &&
+        output_length != 0
+    ) {
+        return native_error(
+            vm, "out of memory"
+        );
+    }
+
+    size_t output = 0;
+    value_index = 0;
+    i = 0;
+
+    while (i < template->length) {
+        if (
+            i + 1 <
+                template->length &&
+            template->chars[i] == '{' &&
+            template->chars[i + 1] == '}'
+        ) {
+            char scalar_buffer[64];
+            const char *chars = NULL;
+            size_t length = 0;
+
+            if (!scalar_text(
+                vm,
+                values->items[
+                    value_index++
+                ],
+                scalar_buffer,
+                &chars,
+                &length
+            )) {
+                free(buffer);
+                return false;
+            }
+
+            memcpy(
+                buffer + output,
+                chars,
+                length
+            );
+
+            output += length;
+            i += 2;
+            continue;
+        }
+
+        buffer[output++] =
+            template->chars[i++];
+    }
+
+    bool ok = make_string_value(
+        vm,
+        buffer,
+        output_length,
         result
     );
 
@@ -3280,6 +3488,10 @@ static bool prepare_run(
         !define_native(
             vm, "join", 2,
             native_join
+        ) ||
+        !define_native(
+            vm, "format", 2,
+            native_format
         ) ||
         !define_native(
             vm, "env", 1, native_env

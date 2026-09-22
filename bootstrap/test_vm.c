@@ -793,6 +793,21 @@ int main(void) {
     );
 
     expect_string(
+        "string-format",
+        "format("
+        "\"{} + {} = {}\", "
+        "[2, 3, 5]"
+        ")\n",
+        "2 + 3 = 5",
+        9
+    );
+
+    expect_error(
+        "format-placeholder-count",
+        "format(\"{} {}\", [1])\n"
+    );
+
+    expect_string(
         "path-join",
         "path_join(\"alpha\", \"beta\")\n",
         "alpha/beta",
