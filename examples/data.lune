@@ -1,0 +1,10 @@
+config := {
+    host: "localhost",
+    port: null,
+    tags: ["dev", "lune"],
+}
+
+port := config.port or 8080
+print(config.host)
+print(port)
+print(config.tags[0])

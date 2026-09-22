@@ -1,0 +1,19 @@
+max := fn(a, b) => if a > b {
+    a
+} else {
+    b
+}
+
+n := 4
+while n > 0 {
+    print(n)
+    n = n - 1
+}
+
+label := if n == 0 {
+    "done"
+} else if n < 0 {
+    "negative"
+} else {
+    "positive"
+}

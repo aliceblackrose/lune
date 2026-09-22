@@ -1,0 +1,4 @@
+name := "world"
+greet := fn(name) => "hello, " + name
+
+print(greet(name))

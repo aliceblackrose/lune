@@ -1,0 +1,12 @@
+makeCounter := fn(start) => {
+    value := start
+
+    fn() => {
+        value = value + 1
+        value
+    }
+}
+
+next := makeCounter(10)
+print(next())
+print(next())

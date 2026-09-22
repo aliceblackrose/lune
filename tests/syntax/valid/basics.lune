@@ -1,0 +1,9 @@
+name := "lune"
+count := 3
+ratio := 3.5
+enabled := true and not false
+nothing := null
+
+count = count + 1
+print(name)
+print(count)

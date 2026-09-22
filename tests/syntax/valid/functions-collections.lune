@@ -1,0 +1,19 @@
+user := {
+    name: "Alice",
+    tags: ["compiler", "vm"],
+}
+
+user.score = 10
+first := user.tags[0]
+
+makeCounter := fn(start) => {
+    n := start
+    fn() => {
+        n = n + 1
+        n
+    }
+}
+
+counter := makeCounter(0)
+print(counter())
+print(first)

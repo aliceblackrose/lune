@@ -90,6 +90,8 @@ The initial language should avoid classes, inheritance, generics, macros, annota
 - [ ] Example programs under `examples/`
 - [ ] Parser tests for every accepted and rejected syntax form.
 
+**Status:** language contract complete; executable parser tests continue in Milestone 1.
+
 **Done when:** the syntax and semantics of the core language can be described without referring to implementation details.
 
 ---

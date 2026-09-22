@@ -1,0 +1,1 @@
+double := fn(x) x * 2
