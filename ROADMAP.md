@@ -380,7 +380,7 @@ compiler/
     compiler.lune
 ```
 
-- [ ] Port the lexer to Lune.
+- [x] Port the lexer to Lune.
 - [ ] Port the Pratt parser to Lune.
 - [ ] Port AST representation to Lune.
 - [ ] Port bytecode emission to Lune.
