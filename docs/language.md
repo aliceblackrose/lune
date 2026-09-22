@@ -326,6 +326,16 @@ The bootstrap scripting runtime currently provides a small set of globals. These
 
 Conversion failures and invalid argument types are runtime errors.
 
+File/process primitives:
+
+- `read_file(path)` reads the complete file and returns its bytes as a Lune string.
+- `write_file(path, data)` replaces a file with the supplied string bytes and returns the number of bytes written.
+- `path_join(a, b)` joins two slash-separated path components; an absolute second path replaces the first.
+- `path_base(path)` returns the final path component.
+- `path_dir(path)` returns the directory portion, or `"."` when no separator is present.
+- `exec(program, arguments)` executes a program directly with a list of string arguments. It does not invoke a shell implicitly. The result is a map with integer `status` plus string `stdout` and `stderr` fields. A process terminated by a signal reports `128 + signal` as its status on POSIX platforms.
+
+
 ## Intentionally absent from version 0
 
 Version 0 has no semicolons, `return`, `const`/`let`/`var`, classes, static types, generics, exceptions, destructuring, pattern matching, macros, async syntax, user-defined operators, dedicated `for` loop, or string interpolation.

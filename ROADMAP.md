@@ -310,11 +310,11 @@ Keep native APIs primitive. Implement higher-level behavior in Lune when practic
 
 ### Files and processes
 
-- [ ] read a file
-- [ ] write a file
-- [ ] path helpers
-- [ ] execute a child process
-- [ ] capture stdout, stderr, and exit status
+- [x] read a file (`read_file`)
+- [x] write a file (`write_file`)
+- [x] path helpers (`path_join`, `path_base`, `path_dir`)
+- [x] execute a child process (`exec`)
+- [x] capture stdout, stderr, and exit status
 
 ### Collections and strings
 
