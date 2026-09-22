@@ -322,9 +322,9 @@ Keep native APIs primitive. Implement higher-level behavior in Lune when practic
 - [ ] `map`
 - [ ] `filter`
 - [ ] `reduce`
-- [ ] string splitting/joining
-- [ ] searching
-- [ ] basic formatting
+- [x] string splitting/joining (`split`, `join`)
+- [x] searching (`find`, `contains`)
+- [x] basic formatting (`format`)
 
 Prefer library methods/functions over new loop or comprehension syntax.
 

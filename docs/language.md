@@ -326,6 +326,16 @@ The bootstrap scripting runtime currently provides a small set of globals. These
 
 Conversion failures and invalid argument types are runtime errors.
 
+String helpers:
+
+- `contains(text, needle)` tests whether a byte substring is present.
+- `find(text, needle)` returns the byte offset of the first match, or `null` when no match exists.
+- `split(text, separator)` returns a list of strings and rejects an empty separator.
+- `join(items, separator)` joins a list of strings.
+- `format(template, values)` replaces each `{}` placeholder with the corresponding scalar value from a list. The placeholder count must match the value count.
+
+String offsets and lengths are byte-oriented in the bootstrap runtime so UTF-8 source/compiler code can explicitly reason about encoded data.
+
 File/process primitives:
 
 - `read_file(path)` reads the complete file and returns its bytes as a Lune string.
