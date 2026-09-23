@@ -1,0 +1,4 @@
+inner := fn() => 1 / 0
+middle := fn() => inner()
+outer := fn() => middle()
+outer()
