@@ -460,7 +460,7 @@ lune compile file.lune
 ```
 
 - [x] Script runner.
-- [ ] REPL.
+- [x] REPL.
 - [x] Syntax checker.
 - [ ] Formatter.
 - [x] Bytecode compilation.
