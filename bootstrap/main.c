@@ -3,6 +3,7 @@
 #include "bytecode_image.h"
 #include "compiler.h"
 #include "lexer.h"
+#include "native_compile.h"
 #include "parser.h"
 #include "value.h"
 #include "vm.h"
@@ -151,6 +152,11 @@ static int execute_file(
 
     LuneVM *vm = NULL;
     LuneValue result = lune_value_null();
+    LuneNativeCompiler native_compiler = {
+        .diagnostic = print_diagnostic,
+        .diagnostic_context = (void *)path,
+    };
+
     if (ok) {
         vm = lune_vm_new(print_diagnostic, (void *)path);
         if (vm == NULL) {
@@ -164,6 +170,11 @@ static int execute_file(
             );
             lune_vm_set_script_path(
                 vm, path
+            );
+            lune_vm_set_source_compiler(
+                vm,
+                lune_native_compile_file,
+                &native_compiler
             );
             ok = lune_vm_run(
                 vm, &chunk, &result
@@ -232,6 +243,11 @@ static int execute_bytecode_file(
             (void *)path
         );
 
+    LuneNativeCompiler native_compiler = {
+        .diagnostic = print_diagnostic,
+        .diagnostic_context = (void *)path,
+    };
+
     bool ok = vm != NULL;
     LuneValue result =
         lune_value_null();
@@ -251,6 +267,12 @@ static int execute_bytecode_file(
 
         lune_vm_set_script_path(
             vm, path
+        );
+
+        lune_vm_set_source_compiler(
+            vm,
+            lune_native_compile_file,
+            &native_compiler
         );
 
         ok = lune_vm_run(
