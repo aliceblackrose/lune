@@ -81,7 +81,7 @@ jobs:
           cp bootstrap/build/lune.exe dist/package/lune-windows-x86_64/lune.exe
           cp bootstrap/build/selfhost/*.lbc dist/package/lune-windows-x86_64/selfhost/
 
-          ./dist/package/lune-windows-x86_64/lune.exe examples/hello.lune | grep -qx 'hello, world'
+          ./dist/package/lune-windows-x86_64/lune.exe examples/hello.lune | grep -Eq '^hello, world\r?$'
 
       - name: Package Windows bundle
         shell: pwsh
