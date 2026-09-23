@@ -71,6 +71,8 @@ struct LuneVM {
 
     LuneDiagnosticFn diagnostic;
     void *diagnostic_context;
+
+    bool initialized;
 };
 
 static bool native_error(
@@ -6863,6 +6865,55 @@ size_t lune_vm_heap_bytes(
     );
 }
 
+static void unwind_execution(
+    LuneVM *vm
+) {
+    while (vm->frame_count > 0) {
+        CallFrame *frame =
+            &vm->frames[
+                vm->frame_count - 1
+            ];
+
+        close_frame_upvalues(
+            vm, frame
+        );
+
+        vm->frame_count--;
+    }
+
+    vm->stack_count = 0;
+    vm->native_root_count = 0;
+    vm->open_upvalues = NULL;
+    vm->has_result = false;
+    vm->last_result =
+        lune_value_null();
+    vm->exit_requested = false;
+    vm->exit_status = 0;
+    vm->native_span =
+        (LuneSpan){0};
+}
+
+static bool push_root_frame(
+    LuneVM *vm,
+    const LuneChunk *chunk
+) {
+    if (
+        vm->frame_count >=
+        FRAME_MAX
+    ) {
+        return false;
+    }
+
+    if (!push_root_frame(
+        vm, chunk
+    )) {
+        return false;
+    }
+
+    vm->initialized = true;
+    return true;
+}
+
 static bool prepare_run(
     LuneVM *vm,
     const LuneChunk *chunk
@@ -6886,6 +6937,7 @@ static bool prepare_run(
     vm->exit_status = 0;
     vm->native_span =
         (LuneSpan){0};
+    vm->initialized = false;
 
     lune_heap_free(
         &vm->heap
@@ -8160,6 +8212,36 @@ bool lune_vm_run(
             vm,
             (LuneSpan){0},
             "out of memory"
+        );
+    }
+
+    return run_until(
+        vm,
+        result,
+        0
+    );
+}
+
+bool lune_vm_run_incremental(
+    LuneVM *vm,
+    const LuneChunk *chunk,
+    LuneValue *result
+) {
+    if (!vm->initialized) {
+        return lune_vm_run(
+            vm, chunk, result
+        );
+    }
+
+    unwind_execution(vm);
+
+    if (!push_root_frame(
+        vm, chunk
+    )) {
+        return runtime_error(
+            vm,
+            (LuneSpan){0},
+            "maximum call depth exceeded"
         );
     }
 
