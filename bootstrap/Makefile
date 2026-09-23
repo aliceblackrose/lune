@@ -107,6 +107,12 @@ test-production: $(BUILD)/lune
 	./$(BUILD)/lune compile $(BUILD)/cli-hello.lune
 	test -f $(BUILD)/cli-hello.lbc
 	./$(BUILD)/lune $(BUILD)/cli-hello.lbc
+	cp ../tests/fmt/unformatted.lune $(BUILD)/fmt-case.lune
+	./$(BUILD)/lune fmt $(BUILD)/fmt-case.lune
+	cmp $(BUILD)/fmt-case.lune ../tests/fmt/expected.lune
+	./$(BUILD)/lune fmt $(BUILD)/fmt-case.lune
+	cmp $(BUILD)/fmt-case.lune ../tests/fmt/expected.lune
+	./$(BUILD)/lune check $(BUILD)/fmt-case.lune
 	printf '%s\n' 'make := fn(x) => {' '  fn() => x' '}' 'f := make(42)' 'f()' ':quit' | ./$(BUILD)/lune repl > $(BUILD)/repl.out
 	tail -n 1 $(BUILD)/repl.out | grep -qx '42'
 	@if ./$(BUILD)/lune ../tests/runtime/stack-trace.lune >$(BUILD)/trace.out 2>$(BUILD)/trace.err; then echo "FAIL: stack trace fixture unexpectedly succeeded"; exit 1; fi
