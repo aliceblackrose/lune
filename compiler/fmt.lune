@@ -1,0 +1,17 @@
+formatter := import("./formatter")
+
+if len(args) != 1 {
+    eprint("usage: fmt.lune FILE")
+    exit(2)
+}
+
+path := args[0]
+source := read_file(path)
+formatted := formatter.format(source)
+
+write_file(
+    path,
+    formatted
+)
+
+null
