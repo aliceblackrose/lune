@@ -460,12 +460,123 @@ static int execute_bytecode(
     return status;
 }
 
+static bool ends_with(
+    const char *text,
+    const char *suffix
+) {
+    size_t text_length =
+        strlen(text);
+    size_t suffix_length =
+        strlen(suffix);
+
+    return
+        text_length >= suffix_length &&
+        memcmp(
+            text +
+                text_length -
+                suffix_length,
+            suffix,
+            suffix_length
+        ) == 0;
+}
+
+static char *compile_output_path(
+    const char *source
+) {
+    size_t length = strlen(source);
+    size_t stem = length;
+
+    if (
+        length >= 5 &&
+        memcmp(
+            source + length - 5,
+            ".lune",
+            5
+        ) == 0
+    ) {
+        stem = length - 5;
+    }
+
+    static const char extension[] =
+        ".lbc";
+
+    char *output = malloc(
+        stem +
+        sizeof(extension)
+    );
+
+    if (output == NULL) {
+        return NULL;
+    }
+
+    memcpy(
+        output,
+        source,
+        stem
+    );
+
+    memcpy(
+        output + stem,
+        extension,
+        sizeof(extension)
+    );
+
+    return output;
+}
+
+static int compile_file(
+    const char *path,
+    ProductionCompiler *compiler
+) {
+    char *output =
+        compile_output_path(path);
+
+    if (output == NULL) {
+        fprintf(
+            stderr,
+            "%s: error: out of memory\n",
+            path
+        );
+        return 1;
+    }
+
+    char error[256] = {0};
+
+    bool ok = run_compiler_stage(
+        compiler,
+        path,
+        output,
+        false,
+        error,
+        sizeof(error)
+    );
+
+    if (!ok && error[0] != '\0') {
+        fprintf(
+            stderr,
+            "%s: error: %s\n",
+            path,
+            error
+        );
+    }
+
+    free(output);
+    return ok ? 0 : 1;
+}
+
 static void usage(
     const char *program
 ) {
     fprintf(
         stderr,
-        "usage: %s <check|run|eval|runbc|evalbc> FILE [ARGS...]\n",
+        "usage:\n"
+        "  %s FILE [ARGS...]\n"
+        "  %s check FILE\n"
+        "  %s compile FILE\n"
+        "  %s <run|eval|runbc|evalbc> FILE [ARGS...]\n",
+        program,
+        program,
+        program,
         program
     );
 }
@@ -474,20 +585,34 @@ int main(
     int argc,
     char **argv
 ) {
-    if (argc < 3) {
+    if (argc < 2) {
         usage(argv[0]);
         return 2;
     }
 
-    bool runtime_command =
-        strcmp(argv[1], "run") == 0 ||
-        strcmp(argv[1], "eval") == 0 ||
-        strcmp(argv[1], "runbc") == 0 ||
-        strcmp(argv[1], "evalbc") == 0;
+    bool direct_run =
+        strcmp(argv[1], "check") != 0 &&
+        strcmp(argv[1], "compile") != 0 &&
+        strcmp(argv[1], "run") != 0 &&
+        strcmp(argv[1], "eval") != 0 &&
+        strcmp(argv[1], "runbc") != 0 &&
+        strcmp(argv[1], "evalbc") != 0;
 
     if (
-        !runtime_command &&
+        !direct_run &&
+        (
+            strcmp(argv[1], "check") == 0 ||
+            strcmp(argv[1], "compile") == 0
+        ) &&
         argc != 3
+    ) {
+        usage(argv[0]);
+        return 2;
+    }
+
+    if (
+        !direct_run &&
+        argc < 3
     ) {
         usage(argv[0]);
         return 2;
@@ -510,7 +635,30 @@ int main(
 
     int result = 2;
 
-    if (
+    if (direct_run) {
+        if (ends_with(
+            argv[1], ".lbc"
+        )) {
+            result = execute_bytecode(
+                argv[1],
+                &compiler,
+                false,
+                argc - 2,
+                (const char *const *)
+                    (argv + 2)
+            );
+        } else {
+            result = compile_and_maybe_run(
+                argv[1],
+                &compiler,
+                true,
+                false,
+                argc - 2,
+                (const char *const *)
+                    (argv + 2)
+            );
+        }
+    } else if (
         strcmp(argv[1], "check") == 0
     ) {
         result = compile_and_maybe_run(
@@ -520,6 +668,13 @@ int main(
             false,
             0,
             NULL
+        );
+    } else if (
+        strcmp(argv[1], "compile") == 0
+    ) {
+        result = compile_file(
+            argv[2],
+            &compiler
         );
     } else if (
         strcmp(argv[1], "run") == 0
