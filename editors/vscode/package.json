@@ -4,7 +4,6 @@
   "description": "Syntax highlighting and editor configuration for the Lune scripting language.",
   "version": "0.1.0",
   "publisher": "lune-lang",
-  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
