@@ -694,8 +694,10 @@ static bool arithmetic(
         }
     }
 
-    LuneValue right;
-    LuneValue left;
+    LuneValue right =
+        lune_value_null();
+    LuneValue left =
+        lune_value_null();
 
     if (
         !pop(vm, &right, span) ||
@@ -922,8 +924,10 @@ static bool get_index(
     LuneVM *vm,
     LuneSpan span
 ) {
-    LuneValue index;
-    LuneValue object;
+    LuneValue index =
+        lune_value_null();
+    LuneValue object =
+        lune_value_null();
 
     if (
         !pop(vm, &index, span) ||
@@ -1010,9 +1014,12 @@ static bool set_index(
     LuneVM *vm,
     LuneSpan span
 ) {
-    LuneValue value;
-    LuneValue index;
-    LuneValue object;
+    LuneValue value =
+        lune_value_null();
+    LuneValue index =
+        lune_value_null();
+    LuneValue object =
+        lune_value_null();
 
     if (
         !pop(vm, &value, span) ||
@@ -1106,7 +1113,7 @@ static bool get_field(
     uint16_t index,
     LuneSpan span
 ) {
-    const LuneName *name;
+    const LuneName *name = NULL;
 
     if (!read_name(
         vm,
@@ -1118,7 +1125,8 @@ static bool get_field(
         return false;
     }
 
-    LuneValue object;
+    LuneValue object =
+        lune_value_null();
 
     if (!pop(
         vm, &object, span
@@ -1160,7 +1168,7 @@ static bool set_field(
     uint16_t index,
     LuneSpan span
 ) {
-    const LuneName *name;
+    const LuneName *name = NULL;
 
     if (!read_name(
         vm,
@@ -7312,9 +7320,11 @@ static bool run_until(
                         frame->ip++
                     ];
 
-        uint16_t index;
-        LuneValue a;
-        LuneValue b;
+        uint16_t index = 0;
+        LuneValue a =
+            lune_value_null();
+        LuneValue b =
+            lune_value_null();
 
         switch (opcode) {
             case LUNE_OP_CONSTANT:
@@ -7377,7 +7387,7 @@ static bool run_until(
                 break;
 
             case LUNE_OP_STRING: {
-                const LuneName *name;
+                const LuneName *name = NULL;
 
                 if (
                     !read_u16(
@@ -7720,7 +7730,7 @@ static bool run_until(
                 break;
 
             case LUNE_OP_GET_GLOBAL: {
-                const LuneName *name;
+                const LuneName *name = NULL;
 
                 if (
                     !read_u16(
@@ -7762,7 +7772,7 @@ static bool run_until(
             }
 
             case LUNE_OP_DEFINE_GLOBAL: {
-                const LuneName *name;
+                const LuneName *name = NULL;
 
                 if (
                     !read_u16(
@@ -7817,7 +7827,7 @@ static bool run_until(
             }
 
             case LUNE_OP_SET_GLOBAL: {
-                const LuneName *name;
+                const LuneName *name = NULL;
 
                 if (
                     !read_u16(
