@@ -1,0 +1,6 @@
+values := [1, 2]  // list
+if values[0] < 2 {
+    result := {ok: true, count: len(values)}
+    // keep this comment
+    print(result.ok)
+}
