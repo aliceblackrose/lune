@@ -29,6 +29,13 @@ expected = expected + "}\n"
 
 formatted := formatter.format(input)
 
+if formatted != expected {
+    eprint("formatter actual:")
+    eprint(formatted)
+    eprint("formatter expected:")
+    eprint(expected)
+}
+
 assert(
     formatted == expected,
     "canonical output"
