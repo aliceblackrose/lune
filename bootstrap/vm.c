@@ -60,6 +60,9 @@ struct LuneVM {
     const char *const *process_argv;
     const char *script_path;
 
+    LuneSourceCompilerFn source_compiler;
+    void *source_compiler_context;
+
     ModuleEntry *modules;
     size_t module_count;
     size_t module_capacity;
@@ -5643,6 +5646,37 @@ static bool native_import(
             lune_chunk_free(chunk);
             free(chunk);
         }
+    } else if (
+        vm->source_compiler != NULL
+    ) {
+        LuneChunk *chunk =
+            malloc(sizeof(*chunk));
+
+        if (chunk == NULL) {
+            free(source);
+            return native_error(
+                vm, "out of memory"
+            );
+        }
+
+        lune_chunk_init(chunk);
+
+        compiled =
+            vm->source_compiler(
+                vm->source_compiler_context,
+                entry->key,
+                true,
+                chunk,
+                error,
+                sizeof(error)
+            );
+
+        if (compiled) {
+            entry->chunk = chunk;
+        } else {
+            lune_chunk_free(chunk);
+            free(chunk);
+        }
     } else {
         compiled =
             module_compile_wrapper(
@@ -6905,6 +6939,16 @@ void lune_vm_set_script_path(
     const char *path
 ) {
     vm->script_path = path;
+}
+
+void lune_vm_set_source_compiler(
+    LuneVM *vm,
+    LuneSourceCompilerFn compiler,
+    void *context
+) {
+    vm->source_compiler = compiler;
+    vm->source_compiler_context =
+        context;
 }
 
 bool lune_vm_exit_status(
