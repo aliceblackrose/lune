@@ -1,0 +1,106 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Lune",
+  "scopeName": "source.lune",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#calls"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.lune",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.lune",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.lune",
+              "match": "\\\\(?:[\"\\nrt0]|u\\{[0-9A-Fa-f]+\\})"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.lune",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.lune",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.lune",
+          "match": "\\b(?:if|else|while)\\b"
+        },
+        {
+          "name": "storage.type.function.lune",
+          "match": "\\bfn\\b"
+        },
+        {
+          "name": "constant.language.boolean.lune",
+          "match": "\\b(?:true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.lune",
+          "match": "\\bnull\\b"
+        },
+        {
+          "name": "keyword.operator.word.lune",
+          "match": "\\b(?:and|or|not)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.assignment.lune",
+          "match": ":=|=>|==|!=|<=|>=|=|<|>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.lune",
+          "match": "[+*/%\\-]"
+        }
+      ]
+    },
+    "calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.call.lune",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    }
+  }
+}
