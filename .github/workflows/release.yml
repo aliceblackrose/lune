@@ -1,0 +1,70 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Run test suite
+        run: make test
+
+      - name: Build release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          make clean
+          make
+
+          mkdir -p dist/package/lune-linux-x86_64/selfhost
+
+          cp bootstrap/build/lune dist/lune-linux-x86_64
+          chmod +x dist/lune-linux-x86_64
+
+          cp bootstrap/build/lune dist/package/lune-linux-x86_64/lune
+          chmod +x dist/package/lune-linux-x86_64/lune
+          cp bootstrap/build/selfhost/*.lbc dist/package/lune-linux-x86_64/selfhost/
+
+          tar -C dist/package -czf dist/lune-linux-x86_64.tar.gz lune-linux-x86_64
+
+          (
+            cd dist
+            sha256sum lune-linux-x86_64 lune-linux-x86_64.tar.gz > SHA256SUMS
+          )
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          assets=(
+            dist/lune-linux-x86_64
+            dist/lune-linux-x86_64.tar.gz
+            dist/SHA256SUMS
+          )
+
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "Lune $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
