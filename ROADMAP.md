@@ -478,20 +478,20 @@ lune compile file.lune
 ### Developer tooling
 
 - [x] Stable formatter.
-- [ ] Syntax highlighting definition.
-- [ ] Editor integration.
-- [ ] Language server only after syntax/semantics stabilize.
+- [x] Syntax highlighting definition.
+- [x] Editor integration.
+- [x] Language server only after syntax/semantics stabilize.
 
 ### Release
 
-- [ ] Language reference.
-- [ ] Standard-library reference.
-- [ ] Installation instructions.
-- [ ] Architecture documentation.
-- [ ] Self-hosting documentation.
-- [ ] Changelog.
-- [ ] Reproducible test suite.
-- [ ] Performance baseline.
+- [x] Language reference.
+- [x] Standard-library reference.
+- [x] Installation instructions.
+- [x] Architecture documentation.
+- [x] Self-hosting documentation.
+- [x] Changelog.
+- [x] Reproducible test suite.
+- [x] Performance baseline.
 
 **Done when:** Lune 0.1 is small, documented, self-hosted, useful for everyday scripts, and has enough tooling to be pleasant to write.
 
