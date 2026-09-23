@@ -3,9 +3,10 @@ CFLAGS ?= -std=c17 -O2 -Wall -Wextra -Wpedantic -Werror
 
 BUILD := build
 SELFHOST := $(BUILD)/selfhost
-FRONTEND := lexer.c ast.c parser.c compiler.c native_compile.c
+FRONTEND := lexer.c ast.c parser.c
+BOOTSTRAP_COMPILER := compiler.c native_compile.c
 CORE := value.c object.c bytecode.c bytecode_image.c platform.c vm.c
-COMMON := $(FRONTEND) $(CORE)
+COMMON := $(FRONTEND) $(BOOTSTRAP_COMPILER) $(CORE)
 SELFHOST_SOURCES := \
 	../compiler/lexer.lune \
 	../compiler/parser.lune \
