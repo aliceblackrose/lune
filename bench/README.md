@@ -1,6 +1,6 @@
 # Lune benchmarks
 
-The benchmark suite is a baseline for finding regressions and deciding which runtime optimizations are worth adding. It is not intended to produce portable absolute scores across different machines.
+The benchmark suite is a baseline for finding regressions and deciding which runtime optimizations are worth adding. It is not intended to produce portable absolute scores across different machines. The recorded Lune 0.1 CI reference is in [baseline.md](baseline.md).
 
 Run:
 
