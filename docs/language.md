@@ -1,6 +1,6 @@
-# Lune language contract
+# Lune 0.1 language reference
 
-This document defines the initial Lune language contract. It describes language behavior, not a particular parser or VM implementation.
+This document defines the Lune 0.1 language contract. It describes language behavior, not a particular parser or VM implementation. Runtime globals and native modules are documented separately in [stdlib.md](stdlib.md).
 
 Lune is a small, expression-oriented scripting language. Its core is intentionally narrow: values, bindings, functions, conditionals, loops, calls, indexing, and member access.
 
