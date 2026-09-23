@@ -1,4 +1,5 @@
 #include "compiler.h"
+#include "native_compile.h"
 #include "object.h"
 #include "parser.h"
 #include "vm.h"
@@ -104,6 +105,19 @@ static EvalResult eval_with_args(
             lune_vm_set_script_path(
                 vm, "."
             );
+
+            LuneNativeCompiler native_compiler = {
+                .diagnostic = diagnostic,
+                .diagnostic_context =
+                    &diagnostics,
+            };
+
+            lune_vm_set_source_compiler(
+                vm,
+                lune_native_compile_file,
+                &native_compiler
+            );
+
             lune_vm_set_gc_stress(
                 vm, true
             );
