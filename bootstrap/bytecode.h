@@ -1,7 +1,7 @@
 #ifndef LUNE_BYTECODE_H
 #define LUNE_BYTECODE_H
 
-#include "lexer.h"
+#include "source.h"
 #include "value.h"
 
 #include <stdbool.h>
