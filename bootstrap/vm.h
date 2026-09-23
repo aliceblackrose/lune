@@ -62,5 +62,10 @@ bool lune_vm_run(
     const LuneChunk *chunk,
     LuneValue *result
 );
+bool lune_vm_run_incremental(
+    LuneVM *vm,
+    const LuneChunk *chunk,
+    LuneValue *result
+);
 
 #endif
