@@ -10,11 +10,13 @@ user := {name: "world"}
 print(greet(user.name))
 ```
 
-See [the language contract](docs/language.md) for current semantics and [the roadmap](ROADMAP.md) for implementation milestones.
+Start with [installation](docs/install.md), then see the [Lune 0.1 language reference](docs/language.md), [standard-library reference](docs/stdlib.md), and [roadmap](ROADMAP.md). Implementation details are covered by the [architecture](docs/architecture.md), [self-hosting guide](docs/self-hosting.md), and [bytecode format](docs/bytecode.md). Release changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
 The ANTLR grammar under `grammar/` is a reference/prototyping grammar. The production frontend is the hand-written lexer, Pratt parser, and bytecode compiler under `compiler/`, all written in Lune.
 
 ## Build and run
+
+For a system or user-prefix install, see [docs/install.md](docs/install.md).
 
 The default build produces the production CLI and the self-hosted compiler bytecode it uses:
 
@@ -88,3 +90,20 @@ byte-for-byte comparison
 ```
 
 The native VM exposes a generic source-compiler hook rather than depending on parser/compiler internals. The production CLI installs the self-hosted compiler behind that hook; the bootstrap CLI installs the C frontend adapter.
+
+
+## Editor support
+
+Declarative VS Code support lives under `editors/vscode/` and includes `.lune` file recognition, TextMate syntax highlighting, comments/brackets, and indentation rules.
+
+A dependency-free Python LSP adapter lives under `editors/lsp/`. It delegates diagnostics to `lune check` and formatting to `lune fmt`, so editor behavior uses the production compiler rather than a duplicate parser.
+
+## Performance
+
+Run the benchmark suite with:
+
+```sh
+make bench
+```
+
+The benchmark methodology is described in [bench/README.md](bench/README.md), and the recorded 0.1 CI reference is in [bench/baseline.md](bench/baseline.md).
