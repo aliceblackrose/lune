@@ -462,7 +462,7 @@ lune compile file.lune
 - [x] Script runner.
 - [x] REPL.
 - [x] Syntax checker.
-- [ ] Formatter.
+- [x] Formatter.
 - [x] Bytecode compilation.
 - [x] Bytecode execution.
 
@@ -477,7 +477,7 @@ lune compile file.lune
 
 ### Developer tooling
 
-- [ ] Stable formatter.
+- [x] Stable formatter.
 - [ ] Syntax highlighting definition.
 - [ ] Editor integration.
 - [ ] Language server only after syntax/semantics stabilize.
