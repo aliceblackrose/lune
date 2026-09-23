@@ -10,6 +10,17 @@
 
 typedef struct LuneVM LuneVM;
 
+typedef struct {
+    const char *path;
+    LuneSpan span;
+    const char *message;
+} LuneRuntimeError;
+
+typedef struct {
+    const char *path;
+    LuneSpan span;
+} LuneTraceFrame;
+
 typedef bool (*LuneSourceCompilerFn)(
     void *context,
     const char *path,
@@ -55,6 +66,18 @@ void lune_vm_set_source_compiler(
 bool lune_vm_exit_status(
     const LuneVM *vm,
     int *status
+);
+bool lune_vm_last_error(
+    const LuneVM *vm,
+    LuneRuntimeError *error
+);
+size_t lune_vm_trace_count(
+    const LuneVM *vm
+);
+bool lune_vm_trace_frame(
+    const LuneVM *vm,
+    size_t index,
+    LuneTraceFrame *frame
 );
 
 bool lune_vm_run(
