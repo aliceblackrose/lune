@@ -33,7 +33,7 @@ Runtime globals include `print`, `eprint`, `type`, `len`, scalar conversions, `a
 
 The REPL keeps bindings and closures alive across entries, accepts multiline blocks while delimiters are open, and exits on EOF, `:quit`, or `:exit`.
 
-Compiler diagnostics include filename, line, column, the offending source line, and a caret range for the reported span.
+Compiler diagnostics include filename, line, column, the offending source line, and a caret range for the reported span. Runtime failures include the same source context plus path-aware caller stack traces, including calls that cross source-module boundaries.
 
 Script arguments follow the file path:
 
