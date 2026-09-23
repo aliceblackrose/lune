@@ -403,8 +403,9 @@ static bool compile_source(
     return ok;
 }
 
-static char *production_stage_path(
-    const char *program
+static char *production_tool_path(
+    const char *program,
+    const char *name
 ) {
     char error[256];
     char *canonical = NULL;
@@ -447,8 +448,8 @@ static char *production_stage_path(
     }
 #endif
 
-    const char *suffix =
-        "selfhost/stage.lbc";
+    static const char prefix[] =
+        "selfhost/";
 
     size_t directory_length =
         slash == NULL
@@ -457,12 +458,27 @@ static char *production_stage_path(
             slash - canonical + 1
         );
 
-    size_t suffix_length =
-        strlen(suffix);
+    size_t prefix_length =
+        sizeof(prefix) - 1;
+
+    size_t name_length =
+        strlen(name);
+
+    if (
+        directory_length >
+            SIZE_MAX -
+                prefix_length -
+                name_length -
+                1
+    ) {
+        free(canonical);
+        return NULL;
+    }
 
     char *path = malloc(
         directory_length +
-        suffix_length +
+        prefix_length +
+        name_length +
         1
     );
 
@@ -471,24 +487,33 @@ static char *production_stage_path(
         return NULL;
     }
 
+    size_t offset = 0;
+
     if (directory_length > 0) {
         memcpy(
             path,
             canonical,
             directory_length
         );
+        offset = directory_length;
     }
 
     memcpy(
-        path + directory_length,
-        suffix,
-        suffix_length + 1
+        path + offset,
+        prefix,
+        prefix_length
+    );
+    offset += prefix_length;
+
+    memcpy(
+        path + offset,
+        name,
+        name_length + 1
     );
 
     free(canonical);
     return path;
 }
-
 static int execute_chunk(
     const char *path,
     LuneChunk *chunk,
@@ -1263,8 +1288,10 @@ static void usage(
         "  %s FILE [ARGS...]\n"
         "  %s repl\n"
         "  %s check FILE\n"
+        "  %s fmt FILE\n"
         "  %s compile FILE\n"
         "  %s <run|eval|runbc|evalbc> FILE [ARGS...]\n",
+        program,
         program,
         program,
         program,
@@ -1285,6 +1312,7 @@ int main(
     bool direct_run =
         strcmp(argv[1], "repl") != 0 &&
         strcmp(argv[1], "check") != 0 &&
+        strcmp(argv[1], "fmt") != 0 &&
         strcmp(argv[1], "compile") != 0 &&
         strcmp(argv[1], "run") != 0 &&
         strcmp(argv[1], "eval") != 0 &&
@@ -1307,6 +1335,7 @@ int main(
         !repl_command &&
         (
             strcmp(argv[1], "check") == 0 ||
+            strcmp(argv[1], "fmt") == 0 ||
             strcmp(argv[1], "compile") == 0
         ) &&
         argc != 3
@@ -1325,7 +1354,9 @@ int main(
     }
 
     char *stage_path =
-        production_stage_path(argv[0]);
+        production_tool_path(
+            argv[0], "stage.lbc"
+        );
 
     if (stage_path == NULL) {
         fprintf(
@@ -1338,6 +1369,20 @@ int main(
     ProductionCompiler compiler = {
         .stage_path = stage_path,
     };
+
+    char *fmt_path =
+        production_tool_path(
+            argv[0], "fmt.lbc"
+        );
+
+    if (fmt_path == NULL) {
+        free(stage_path);
+        fprintf(
+            stderr,
+            "lune: error: unable to locate formatter bytecode\n"
+        );
+        return 1;
+    }
 
     int result = 2;
 
@@ -1379,6 +1424,31 @@ int main(
             0,
             NULL
         );
+    } else if (
+        strcmp(argv[1], "fmt") == 0
+    ) {
+        result = compile_and_maybe_run(
+            argv[2],
+            &compiler,
+            false,
+            false,
+            0,
+            NULL
+        );
+
+        if (result == 0) {
+            const char *fmt_args[1] = {
+                argv[2],
+            };
+
+            result = execute_bytecode(
+                fmt_path,
+                &compiler,
+                false,
+                1,
+                fmt_args
+            );
+        }
     } else if (
         strcmp(argv[1], "compile") == 0
     ) {
@@ -1436,6 +1506,7 @@ int main(
         usage(argv[0]);
     }
 
+    free(fmt_path);
     free(stage_path);
     return result;
 }
