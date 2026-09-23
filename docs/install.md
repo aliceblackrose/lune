@@ -10,7 +10,7 @@ For the supported POSIX build path:
 - POSIX `make`;
 - standard Unix install utilities for `make install`.
 
-Python 3 is used only by the startup benchmark in `make bench`; it is not required to build, install, or run Lune.
+Python 3 is used by the startup benchmark and the optional language-server adapter under `editors/lsp/`; it is not required to build, install, or run the Lune CLI.
 
 The continuous-integration build is validated on Ubuntu. The runtime contains Windows-specific platform paths, but the 0.1 release install procedure is the POSIX path documented here.
 
