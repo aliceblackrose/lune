@@ -2,7 +2,7 @@
 
 Lune is an experimental small, modern scripting language built around a minimal composable core, fast bytecode execution, and a self-hosted compiler.
 
-Current status: **self-hosted compiler / native VM**.
+Current status: **Lune 0.1 — self-hosted compiler / native VM**.
 
 ```lune
 greet := fn(name) => "hello, " + name
