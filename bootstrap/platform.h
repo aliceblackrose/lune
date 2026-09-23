@@ -35,6 +35,12 @@ bool lune_platform_canonical_path(
     size_t error_capacity
 );
 
+bool lune_platform_temp_file(
+    char **path,
+    char *error,
+    size_t error_capacity
+);
+
 bool lune_platform_exec(
     const char *program,
     char *const argv[],
