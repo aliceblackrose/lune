@@ -10,6 +10,15 @@
 
 typedef struct LuneVM LuneVM;
 
+typedef bool (*LuneSourceCompilerFn)(
+    void *context,
+    const char *path,
+    bool module,
+    LuneChunk *chunk,
+    char *error,
+    size_t error_capacity
+);
+
 LuneVM *lune_vm_new(
     LuneDiagnosticFn diagnostic,
     void *diagnostic_context
@@ -37,6 +46,11 @@ void lune_vm_set_process_args(
 void lune_vm_set_script_path(
     LuneVM *vm,
     const char *path
+);
+void lune_vm_set_source_compiler(
+    LuneVM *vm,
+    LuneSourceCompilerFn compiler,
+    void *context
 );
 bool lune_vm_exit_status(
     const LuneVM *vm,
