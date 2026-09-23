@@ -27,6 +27,8 @@ make
 ./bootstrap/build/lune repl
 ```
 
+`lune fmt file.lune` rewrites a valid source file in place using the self-hosted stable formatter. It preserves line comments and statement newlines, normalizes intra-line spacing, uses four-space brace indentation, and is tested for idempotence.
+
 Ordinary `.lune` source execution is compiled by the Lune-written compiler. A source file can be run directly with `lune file.lune`; `lune compile file.lune` writes a sibling `.lbc` image, and a `.lbc` path can also be executed directly. The production executable links only the VM, GC, bytecode/image loader, object/value runtime, and platform layer. Source modules imported at runtime are compiled through the same self-hosted compiler path.
 
 Runtime globals include `print`, `eprint`, `type`, `len`, scalar conversions, `args`, `env`, `exit`, higher-order list helpers (`each`, `map`, `filter`, `reduce`), string helpers (`split`, `join`, `find`, `contains`, `format`), JSON parse/serialization, file/path helpers, direct child-process execution via `exec`, and cached modules through `import`.
