@@ -20,12 +20,13 @@ The default build produces the production CLI and the self-hosted compiler bytec
 
 ```sh
 make
-./bootstrap/build/lune run examples/hello.lune
+./bootstrap/build/lune examples/hello.lune
 ./bootstrap/build/lune eval examples/scalars.lune
 ./bootstrap/build/lune check examples/functions.lune
+./bootstrap/build/lune compile examples/hello.lune
 ```
 
-Ordinary `.lune` source execution is compiled by the Lune-written compiler. The production executable links only the VM, GC, bytecode/image loader, object/value runtime, and platform layer. Source modules imported at runtime are compiled through the same self-hosted compiler path.
+Ordinary `.lune` source execution is compiled by the Lune-written compiler. A source file can be run directly with `lune file.lune`; `lune compile file.lune` writes a sibling `.lbc` image, and a `.lbc` path can also be executed directly. The production executable links only the VM, GC, bytecode/image loader, object/value runtime, and platform layer. Source modules imported at runtime are compiled through the same self-hosted compiler path.
 
 Runtime globals include `print`, `type`, `len`, scalar conversions, `args`, `env`, `exit`, higher-order list helpers (`each`, `map`, `filter`, `reduce`), string helpers (`split`, `join`, `find`, `contains`, `format`), JSON parse/serialization, file/path helpers, direct child-process execution via `exec`, and cached modules through `import`.
 
