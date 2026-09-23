@@ -6904,13 +6904,22 @@ static bool push_root_frame(
         return false;
     }
 
-    if (!push_root_frame(
-        vm, chunk
-    )) {
-        return false;
-    }
+    CallFrame *root =
+        &vm->frames[
+            vm->frame_count++
+        ];
 
-    vm->initialized = true;
+    *root = (CallFrame){
+        .chunk = chunk,
+        .ip = 0,
+        .stack_base = 0,
+        .closure = NULL,
+        .module_path =
+            vm->script_path != NULL
+            ? vm->script_path
+            : ".",
+    };
+
     return true;
 }
 
@@ -7090,22 +7099,13 @@ static bool prepare_run(
         return false;
     }
 
-    CallFrame *root =
-        &vm->frames[
-            vm->frame_count++
-        ];
+    if (!push_root_frame(
+        vm, chunk
+    )) {
+        return false;
+    }
 
-    *root = (CallFrame){
-        .chunk = chunk,
-        .ip = 0,
-        .stack_base = 0,
-        .closure = NULL,
-        .module_path =
-            vm->script_path != NULL
-            ? vm->script_path
-            : ".",
-    };
-
+    vm->initialized = true;
     return true;
 }
 
