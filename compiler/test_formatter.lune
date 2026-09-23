@@ -11,21 +11,21 @@ assert := fn(condition, message) =>
         exit(1)
     }
 
-input :=
-    "x:= [1,2] // keep me\n" +
-    "if x[0]<2 {\n" +
-    " y:={a:1,b:-2}\n" +
-    "   // nested comment\n" +
-    " print(y.a)\n" +
-    "}\n"
+input := ""
+input = input + "x:= [1,2] // keep me\n"
+input = input + "if x[0]<2 {\n"
+input = input + " y:={a:1,b:-2}\n"
+input = input + "   // nested comment\n"
+input = input + " print(y.a)\n"
+input = input + "}\n"
 
-expected :=
-    "x := [1, 2]  // keep me\n" +
-    "if x[0] < 2 {\n" +
-    "    y := {a: 1, b: -2}\n" +
-    "    // nested comment\n" +
-    "    print(y.a)\n" +
-    "}\n"
+expected := ""
+expected = expected + "x := [1, 2]  // keep me\n"
+expected = expected + "if x[0] < 2 {\n"
+expected = expected + "    y := {a: 1, b: -2}\n"
+expected = expected + "    // nested comment\n"
+expected = expected + "    print(y.a)\n"
+expected = expected + "}\n"
 
 formatted := formatter.format(input)
 
@@ -40,17 +40,21 @@ assert(
     "idempotence"
 )
 
-multiline :=
-    "values := [\n" +
-    "1,2,\n" +
-    "3,\n" +
-    "]\n"
+multiline := ""
+multiline = multiline + "values := [\n"
+multiline = multiline + "1,2,\n"
+multiline = multiline + "3,\n"
+multiline = multiline + "]\n"
 
-expected_multiline :=
-    "values := [\n" +
-    "1, 2,\n" +
-    "3,\n" +
-    "]\n"
+expected_multiline := ""
+expected_multiline =
+    expected_multiline + "values := [\n"
+expected_multiline =
+    expected_multiline + "1, 2,\n"
+expected_multiline =
+    expected_multiline + "3,\n"
+expected_multiline =
+    expected_multiline + "]\n"
 
 assert(
     formatter.format(multiline) ==
@@ -58,8 +62,7 @@ assert(
     "multiline collection"
 )
 
-string_comment :=
-    "x:=\"// not a comment\"// real\n"
+string_comment := "x:=\"// not a comment\"// real\n"
 
 assert(
     formatter.format(string_comment) ==
