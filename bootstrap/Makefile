@@ -90,6 +90,11 @@ test-production: $(BUILD)/lune
 	./$(BUILD)/lune check ../examples/hello.lune
 	@if ./$(BUILD)/lune check ../tests/syntax/invalid/missing-arrow.lune >/dev/null 2>&1; then echo "FAIL: production compiler accepted invalid syntax"; exit 1; fi
 	./$(BUILD)/lune run ../examples/hello.lune
+	./$(BUILD)/lune ../examples/hello.lune
+	cp ../examples/hello.lune $(BUILD)/cli-hello.lune
+	./$(BUILD)/lune compile $(BUILD)/cli-hello.lune
+	test -f $(BUILD)/cli-hello.lbc
+	./$(BUILD)/lune $(BUILD)/cli-hello.lbc
 	./$(BUILD)/lune run ../tests/runtime/source-import/main.lune
 	./$(BUILD)/lune eval ../tests/runtime/source-import/main.lune | grep -qx '42'
 
