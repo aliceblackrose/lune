@@ -23,6 +23,7 @@ typedef struct {
 
     LuneObjClosure *closure;
     const char *module_path;
+    LuneSpan call_span;
 
     LuneValue locals[LOCAL_MAX];
     bool local_defined[LOCAL_MAX];
@@ -72,6 +73,12 @@ struct LuneVM {
     LuneDiagnosticFn diagnostic;
     void *diagnostic_context;
 
+    bool has_runtime_error;
+    LuneSpan runtime_error_span;
+    const char *runtime_error_path;
+    char runtime_error_message[256];
+    size_t runtime_error_frame_count;
+
     bool initialized;
 };
 
@@ -94,18 +101,60 @@ static bool invoke_callable(
     LuneValue *result
 );
 
+static CallFrame *current_frame(
+    LuneVM *vm
+);
+
+static void clear_runtime_error(
+    LuneVM *vm
+) {
+    vm->has_runtime_error = false;
+    vm->runtime_error_span =
+        (LuneSpan){0};
+    vm->runtime_error_path = NULL;
+    vm->runtime_error_message[0] =
+        '\0';
+    vm->runtime_error_frame_count = 0;
+}
+
 static bool runtime_error(
     LuneVM *vm,
     LuneSpan span,
     const char *message
 ) {
-    if (vm->diagnostic != NULL) {
-        vm->diagnostic(
-            vm->diagnostic_context,
-            span,
+    if (!vm->has_runtime_error) {
+        CallFrame *frame =
+            current_frame(vm);
+
+        vm->has_runtime_error = true;
+        vm->runtime_error_span = span;
+        vm->runtime_error_path =
+            frame != NULL &&
+            frame->module_path != NULL
+            ? frame->module_path
+            : vm->script_path;
+
+        (void)snprintf(
+            vm->runtime_error_message,
+            sizeof(
+                vm->runtime_error_message
+            ),
+            "%s",
             message
         );
+
+        vm->runtime_error_frame_count =
+            vm->frame_count;
+
+        if (vm->diagnostic != NULL) {
+            vm->diagnostic(
+                vm->diagnostic_context,
+                span,
+                message
+            );
+        }
     }
+
     return false;
 }
 
@@ -5251,6 +5300,7 @@ static bool module_execute_entry(
         .stack_base = base_stack,
         .closure = NULL,
         .module_path = entry->key,
+        .call_span = vm->native_span,
     };
 
     LuneValue factory =
@@ -6536,6 +6586,7 @@ static bool call_closure(
             closure,
         .module_path =
             closure->module_path,
+        .call_span = span,
     };
 
     for (
@@ -6867,6 +6918,90 @@ bool lune_vm_exit_status(
     return true;
 }
 
+bool lune_vm_last_error(
+    const LuneVM *vm,
+    LuneRuntimeError *error
+) {
+    if (!vm->has_runtime_error) {
+        return false;
+    }
+
+    if (error != NULL) {
+        *error = (LuneRuntimeError){
+            .path =
+                vm->runtime_error_path,
+            .span =
+                vm->runtime_error_span,
+            .message =
+                vm->runtime_error_message,
+        };
+    }
+
+    return true;
+}
+
+size_t lune_vm_trace_count(
+    const LuneVM *vm
+) {
+    return vm->has_runtime_error
+        ? vm->runtime_error_frame_count
+        : 0;
+}
+
+bool lune_vm_trace_frame(
+    const LuneVM *vm,
+    size_t index,
+    LuneTraceFrame *trace
+) {
+    size_t count =
+        lune_vm_trace_count(vm);
+
+    if (
+        index >= count ||
+        trace == NULL
+    ) {
+        return false;
+    }
+
+    size_t deepest = count - 1;
+
+    if (index == 0) {
+        const CallFrame *frame =
+            &vm->frames[deepest];
+
+        *trace = (LuneTraceFrame){
+            .path =
+                frame->module_path != NULL
+                ? frame->module_path
+                : vm->script_path,
+            .span =
+                vm->runtime_error_span,
+        };
+
+        return true;
+    }
+
+    size_t child =
+        deepest - (index - 1);
+
+    const CallFrame *child_frame =
+        &vm->frames[child];
+
+    const CallFrame *caller =
+        &vm->frames[child - 1];
+
+    *trace = (LuneTraceFrame){
+        .path =
+            caller->module_path != NULL
+            ? caller->module_path
+            : vm->script_path,
+        .span =
+            child_frame->call_span,
+    };
+
+    return true;
+}
+
 void lune_vm_set_gc_stress(
     LuneVM *vm,
     bool enabled
@@ -6918,6 +7053,7 @@ static void unwind_execution(
     vm->exit_status = 0;
     vm->native_span =
         (LuneSpan){0};
+    clear_runtime_error(vm);
 }
 
 static bool push_root_frame(
@@ -6945,6 +7081,7 @@ static bool push_root_frame(
             vm->script_path != NULL
             ? vm->script_path
             : ".",
+        .call_span = (LuneSpan){0},
     };
 
     return true;
@@ -6973,6 +7110,7 @@ static bool prepare_run(
     vm->exit_status = 0;
     vm->native_span =
         (LuneSpan){0};
+    clear_runtime_error(vm);
     vm->initialized = false;
 
     lune_heap_free(
