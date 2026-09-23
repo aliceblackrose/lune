@@ -9,7 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -219,13 +221,29 @@ bool lune_platform_canonical_path(
     size_t error_capacity
 ) {
 #if defined(_WIN32)
-    size_t length = strlen(path);
+    DWORD needed =
+        GetFullPathNameA(
+            path,
+            0,
+            NULL,
+            NULL
+        );
 
-    char *copy = malloc(
-        length + 1
-    );
+    if (needed == 0) {
+        set_error(
+            error,
+            error_capacity,
+            "unable to resolve %s (Win32 error %lu)",
+            path,
+            (unsigned long)GetLastError()
+        );
+        return false;
+    }
 
-    if (copy == NULL) {
+    char *resolved =
+        malloc((size_t)needed);
+
+    if (resolved == NULL) {
         set_error(
             error,
             error_capacity,
@@ -234,13 +252,40 @@ bool lune_platform_canonical_path(
         return false;
     }
 
-    memcpy(
-        copy,
-        path,
-        length + 1
-    );
+    DWORD written =
+        GetFullPathNameA(
+            path,
+            needed,
+            resolved,
+            NULL
+        );
 
-    *canonical = copy;
+    if (
+        written == 0 ||
+        written >= needed
+    ) {
+        set_error(
+            error,
+            error_capacity,
+            "unable to resolve %s (Win32 error %lu)",
+            path,
+            (unsigned long)GetLastError()
+        );
+        free(resolved);
+        return false;
+    }
+
+    for (
+        size_t i = 0;
+        i < (size_t)written;
+        i++
+    ) {
+        if (resolved[i] == '\\') {
+            resolved[i] = '/';
+        }
+    }
+
+    *canonical = resolved;
     return true;
 #else
     char *resolved =
