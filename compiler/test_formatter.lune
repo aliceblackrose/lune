@@ -1,0 +1,70 @@
+formatter := import("./formatter")
+
+assert := fn(condition, message) =>
+    if condition {
+        null
+    } else {
+        eprint(
+            "formatter test failed:",
+            message
+        )
+        exit(1)
+    }
+
+input :=
+    "x:= [1,2] // keep me\n" +
+    "if x[0]<2 {\n" +
+    " y:={a:1,b:-2}\n" +
+    "   // nested comment\n" +
+    " print(y.a)\n" +
+    "}\n"
+
+expected :=
+    "x := [1, 2]  // keep me\n" +
+    "if x[0] < 2 {\n" +
+    "    y := {a: 1, b: -2}\n" +
+    "    // nested comment\n" +
+    "    print(y.a)\n" +
+    "}\n"
+
+formatted := formatter.format(input)
+
+assert(
+    formatted == expected,
+    "canonical output"
+)
+
+assert(
+    formatter.format(formatted) ==
+        formatted,
+    "idempotence"
+)
+
+multiline :=
+    "values := [\n" +
+    "1,2,\n" +
+    "3,\n" +
+    "]\n"
+
+expected_multiline :=
+    "values := [\n" +
+    "1, 2,\n" +
+    "3,\n" +
+    "]\n"
+
+assert(
+    formatter.format(multiline) ==
+        expected_multiline,
+    "multiline collection"
+)
+
+string_comment :=
+    "x:=\"// not a comment\"// real\n"
+
+assert(
+    formatter.format(string_comment) ==
+        "x := \"// not a comment\"  // real\n",
+    "string and comment"
+)
+
+print("self-hosted formatter tests passed")
