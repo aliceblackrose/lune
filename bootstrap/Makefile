@@ -100,6 +100,17 @@ test-production: $(BUILD)/lune
 	./$(BUILD)/lune $(BUILD)/cli-hello.lbc
 	printf '%s\n' 'make := fn(x) => {' '  fn() => x' '}' 'f := make(42)' 'f()' ':quit' | ./$(BUILD)/lune repl > $(BUILD)/repl.out
 	tail -n 1 $(BUILD)/repl.out | grep -qx '42'
+	@if ./$(BUILD)/lune ../tests/runtime/stack-trace.lune >$(BUILD)/trace.out 2>$(BUILD)/trace.err; then echo "FAIL: stack trace fixture unexpectedly succeeded"; exit 1; fi
+	grep -Eq 'stack-trace\.lune:1:[0-9]+: error: division by zero' $(BUILD)/trace.err
+	grep -Fq '  inner := fn() => 1 / 0' $(BUILD)/trace.err
+	grep -Fq 'stack trace:' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:2:[0-9]+' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:3:[0-9]+' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:4:[0-9]+' $(BUILD)/trace.err
+	@if ./$(BUILD)/lune ../tests/runtime/trace-module/main.lune >$(BUILD)/module-trace.out 2>$(BUILD)/module-trace.err; then echo "FAIL: module trace fixture unexpectedly succeeded"; exit 1; fi
+	grep -Eq 'trace-module/child\.lune:1:[0-9]+: error: division by zero' $(BUILD)/module-trace.err
+	grep -Fq '  fail := fn() => 1 / 0' $(BUILD)/module-trace.err
+	grep -Eq '  at .*trace-module/main\.lune:2:[0-9]+' $(BUILD)/module-trace.err
 	./$(BUILD)/lune run ../tests/runtime/source-import/main.lune
 	./$(BUILD)/lune eval ../tests/runtime/source-import/main.lune | grep -qx '42'
 
