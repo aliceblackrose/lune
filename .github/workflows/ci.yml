@@ -10,6 +10,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate editor assets
+        run: |
+          python3 -m json.tool editors/vscode/package.json >/dev/null
+          python3 -m json.tool editors/vscode/language-configuration.json >/dev/null
+          python3 -m json.tool editors/vscode/syntaxes/lune.tmLanguage.json >/dev/null
+
       - name: Build and test
         run: make test
 
