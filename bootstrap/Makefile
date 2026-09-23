@@ -88,7 +88,10 @@ test-bootstrap: $(SELFHOST)/.stamp
 
 test-production: $(BUILD)/lune
 	./$(BUILD)/lune check ../examples/hello.lune
-	@if ./$(BUILD)/lune check ../tests/syntax/invalid/missing-arrow.lune >/dev/null 2>&1; then echo "FAIL: production compiler accepted invalid syntax"; exit 1; fi
+	@if ./$(BUILD)/lune check ../tests/syntax/invalid/missing-arrow.lune >$(BUILD)/diag.out 2>$(BUILD)/diag.err; then echo "FAIL: production compiler accepted invalid syntax"; exit 1; fi
+	grep -Eq '^\.\./tests/syntax/invalid/missing-arrow\.lune:[0-9]+:[0-9]+: error: ' $(BUILD)/diag.err
+	grep -Fq '  double := fn(x) x * 2' $(BUILD)/diag.err
+	grep -Eq '^  +\^+' $(BUILD)/diag.err
 	./$(BUILD)/lune run ../examples/hello.lune
 	./$(BUILD)/lune ../examples/hello.lune
 	cp ../examples/hello.lune $(BUILD)/cli-hello.lune
