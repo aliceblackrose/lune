@@ -1,15 +1,10 @@
 #ifndef LUNE_LEXER_H
 #define LUNE_LEXER_H
 
+#include "source.h"
+
 #include <stdbool.h>
 #include <stddef.h>
-
-typedef struct {
-    size_t offset;
-    size_t length;
-    size_t line;
-    size_t column;
-} LuneSpan;
 
 typedef enum {
     LUNE_TOKEN_ERROR = 0,
@@ -61,8 +56,6 @@ typedef struct {
     LuneTokenKind kind;
     LuneSpan span;
 } LuneToken;
-
-typedef void (*LuneDiagnosticFn)(void *context, LuneSpan span, const char *message);
 
 typedef struct {
     const char *source;
