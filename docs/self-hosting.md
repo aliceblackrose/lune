@@ -6,6 +6,8 @@ Lune's compiler frontend is written in Lune under `compiler/`:
 - `parser.lune`
 - `compiler.lune`
 - `bytecode.lune` for deterministic `.lbc` encoding
+- `formatter.lune` for stable source formatting
+- `fmt.lune` as the formatter driver
 - `stage.lune` as the bootstrap compiler driver
 
 The native C frontend under `bootstrap/` remains the seed compiler.
@@ -22,9 +24,9 @@ The `test-bootstrap` target performs this chain:
 
 1. Build the native bootstrap executable.
 2. Run `compiler/stage.lune` through the bootstrap VM.
-3. Emit stage-1 bytecode modules for the lexer, parser, compiler, encoder, and stage driver.
+3. Emit stage-1 bytecode images for the lexer, parser, compiler, encoder, formatter, formatter driver, and stage driver.
 4. Run the stage-1 `stage.lbc` image.
-5. Recompile the same compiler sources into stage-2 images.
+5. Recompile the same compiler/tooling sources into stage-2 images.
 6. Compare every stage-1 and stage-2 image byte-for-byte.
 7. Use the generated compiler to compile `examples/hello.lune`.
 8. Execute the generated program through `runbc`.
@@ -50,4 +52,4 @@ The bootstrap chain currently trusts:
 - the temporary C lexer/parser/compiler used only as the seed;
 - the Lune compiler sources.
 
-Milestone 6 removes the native frontend from ordinary source execution while preserving the seed path for reproducible bootstrapping.
+The production `lune` executable does not link the native lexer, parser, or compiler. Ordinary source execution, `check`, `compile`, source-module imports, and formatter validation all use the Lune-written frontend. The native frontend remains only in `lune-bootstrap` as the reproducible seed path.
