@@ -473,7 +473,7 @@ lune compile file.lune
 - [x] Highlight exact error span.
 - [x] Human-readable parser errors.
 - [x] Runtime stack traces.
-- [ ] Suggestions only when they are unambiguous.
+- [x] Suggestions only when they are unambiguous.
 
 ### Developer tooling
 
