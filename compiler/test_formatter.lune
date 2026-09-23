@@ -47,14 +47,10 @@ multiline = multiline + "3,\n"
 multiline = multiline + "]\n"
 
 expected_multiline := ""
-expected_multiline =
-    expected_multiline + "values := [\n"
-expected_multiline =
-    expected_multiline + "1, 2,\n"
-expected_multiline =
-    expected_multiline + "3,\n"
-expected_multiline =
-    expected_multiline + "]\n"
+expected_multiline = expected_multiline + "values := [\n"
+expected_multiline = expected_multiline + "1, 2,\n"
+expected_multiline = expected_multiline + "3,\n"
+expected_multiline = expected_multiline + "]\n"
 
 assert(
     formatter.format(multiline) ==
