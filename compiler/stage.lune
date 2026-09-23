@@ -147,6 +147,43 @@ display_error := fn(error) => {
     null
 }
 
+normalize_chunk_spans := null
+
+normalize_chunk_spans = fn(chunk) => {
+    prefix_length := len(module_prefix)
+    i := 0
+
+    while i < len(chunk.spans) {
+        span := chunk.spans[i]
+
+        if span.start >= prefix_length {
+            span.start =
+                span.start - prefix_length
+        } else {
+            span.start = 0
+        }
+
+        if span.line > 1 {
+            span.line = span.line - 1
+        } else {
+            span.line = 1
+        }
+
+        i = i + 1
+    }
+
+    i = 0
+
+    while i < len(chunk.functions) {
+        normalize_chunk_spans(
+            chunk.functions[i].chunk
+        )
+        i = i + 1
+    }
+
+    null
+}
+
 compiled := compiler.compile(input)
 
 if len(compiled.errors) > 0 {
@@ -161,6 +198,12 @@ if len(compiled.errors) > 0 {
     }
 
     exit(1)
+}
+
+if module_mode {
+    normalize_chunk_spans(
+        compiled.chunk
+    )
 }
 
 image := bytecode.encode(
