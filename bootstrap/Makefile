@@ -95,6 +95,8 @@ test-production: $(BUILD)/lune
 	./$(BUILD)/lune compile $(BUILD)/cli-hello.lune
 	test -f $(BUILD)/cli-hello.lbc
 	./$(BUILD)/lune $(BUILD)/cli-hello.lbc
+	printf '%s\n' 'make := fn(x) => {' '  fn() => x' '}' 'f := make(42)' 'f()' ':quit' | ./$(BUILD)/lune repl > $(BUILD)/repl.out
+	tail -n 1 $(BUILD)/repl.out | grep -qx '42'
 	./$(BUILD)/lune run ../tests/runtime/source-import/main.lune
 	./$(BUILD)/lune eval ../tests/runtime/source-import/main.lune | grep -qx '42'
 
