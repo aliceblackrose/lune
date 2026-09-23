@@ -12,6 +12,8 @@ SELFHOST_SOURCES := \
 	../compiler/parser.lune \
 	../compiler/compiler.lune \
 	../compiler/bytecode.lune \
+	../compiler/formatter.lune \
+	../compiler/fmt.lune \
 	../compiler/stage.lune
 
 .PHONY: all bootstrap selfhost-images test test-syntax test-examples test-selfhost test-bootstrap test-production bench bench-build clean
@@ -33,6 +35,8 @@ $(SELFHOST)/.stamp: $(BUILD)/lune-bootstrap $(SELFHOST_SOURCES)
 	./$(BUILD)/lune-bootstrap run ../compiler/stage.lune ../compiler/parser.lune $(SELFHOST)/parser.lbc module
 	./$(BUILD)/lune-bootstrap run ../compiler/stage.lune ../compiler/compiler.lune $(SELFHOST)/compiler.lbc module
 	./$(BUILD)/lune-bootstrap run ../compiler/stage.lune ../compiler/bytecode.lune $(SELFHOST)/bytecode.lbc module
+	./$(BUILD)/lune-bootstrap run ../compiler/stage.lune ../compiler/formatter.lune $(SELFHOST)/formatter.lbc module
+	./$(BUILD)/lune-bootstrap run ../compiler/stage.lune ../compiler/fmt.lune $(SELFHOST)/fmt.lbc
 	./$(BUILD)/lune-bootstrap run ../compiler/stage.lune ../compiler/stage.lune $(SELFHOST)/stage.lbc
 	touch $@
 
@@ -69,6 +73,7 @@ test-selfhost: $(BUILD)/lune-bootstrap
 	./$(BUILD)/lune-bootstrap run ../compiler/test_lexer.lune
 	./$(BUILD)/lune-bootstrap run ../compiler/test_parser.lune
 	./$(BUILD)/lune-bootstrap run ../compiler/test_compiler.lune
+	./$(BUILD)/lune-bootstrap run ../compiler/test_formatter.lune
 	@for f in ../tests/syntax/valid/*.lune; do echo "selfhost check $$f"; ./$(BUILD)/lune-bootstrap run ../compiler/check_parser.lune "$$f" || exit 1; done
 	@for f in ../tests/syntax/invalid/*.lune; do echo "selfhost reject $$f"; if ./$(BUILD)/lune-bootstrap run ../compiler/check_parser.lune "$$f" >/dev/null 2>&1; then echo "FAIL: self-host parser accepted $$f"; exit 1; fi; done
 
@@ -77,11 +82,15 @@ test-bootstrap: $(SELFHOST)/.stamp
 	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/stage.lbc ../compiler/parser.lune $(SELFHOST)/parser2.lbc module
 	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/stage.lbc ../compiler/compiler.lune $(SELFHOST)/compiler2.lbc module
 	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/stage.lbc ../compiler/bytecode.lune $(SELFHOST)/bytecode2.lbc module
+	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/stage.lbc ../compiler/formatter.lune $(SELFHOST)/formatter2.lbc module
+	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/stage.lbc ../compiler/fmt.lune $(SELFHOST)/fmt2.lbc
 	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/stage.lbc ../compiler/stage.lune $(SELFHOST)/stage2.lbc
 	cmp $(SELFHOST)/lexer.lbc $(SELFHOST)/lexer2.lbc
 	cmp $(SELFHOST)/parser.lbc $(SELFHOST)/parser2.lbc
 	cmp $(SELFHOST)/compiler.lbc $(SELFHOST)/compiler2.lbc
 	cmp $(SELFHOST)/bytecode.lbc $(SELFHOST)/bytecode2.lbc
+	cmp $(SELFHOST)/formatter.lbc $(SELFHOST)/formatter2.lbc
+	cmp $(SELFHOST)/fmt.lbc $(SELFHOST)/fmt2.lbc
 	cmp $(SELFHOST)/stage.lbc $(SELFHOST)/stage2.lbc
 	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/stage.lbc ../examples/hello.lune $(SELFHOST)/hello.lbc
 	./$(BUILD)/lune-bootstrap runbc $(SELFHOST)/hello.lbc
