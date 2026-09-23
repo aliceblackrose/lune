@@ -874,8 +874,10 @@ static bool compare(
     LuneOpcode opcode,
     LuneSpan span
 ) {
-    LuneValue right;
-    LuneValue left;
+    LuneValue right =
+        lune_value_null();
+    LuneValue left =
+        lune_value_null();
 
     if (
         !pop(vm, &right, span) ||
