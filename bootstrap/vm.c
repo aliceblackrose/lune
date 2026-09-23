@@ -1691,6 +1691,33 @@ static bool native_print(
     return true;
 }
 
+static bool native_eprint(
+    LuneVM *vm,
+    int argc,
+    const LuneValue *args,
+    LuneValue *result
+) {
+    (void)vm;
+
+    for (
+        int i = 0;
+        i < argc;
+        i++
+    ) {
+        if (i != 0) {
+            fputc(' ', stderr);
+        }
+
+        lune_value_print(
+            stderr, args[i]
+        );
+    }
+
+    fputc('\n', stderr);
+    *result = lune_value_null();
+    return true;
+}
+
 static const char *value_type_name(
     LuneValue value
 ) {
@@ -6980,6 +7007,9 @@ static bool prepare_run(
     if (
         !define_native(
             vm, "print", -1, native_print
+        ) ||
+        !define_native(
+            vm, "eprint", -1, native_eprint
         ) ||
         !define_native(
             vm, "type", 1, native_type
