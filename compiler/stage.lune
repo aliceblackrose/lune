@@ -157,8 +157,7 @@ normalize_chunk_spans = fn(chunk) => {
         span := chunk.spans[i]
 
         if span.start >= prefix_length {
-            span.start =
-                span.start - prefix_length
+            span.start = span.start - prefix_length
         } else {
             span.start = 0
         }
