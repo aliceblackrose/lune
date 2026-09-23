@@ -554,7 +554,8 @@ static bool one_edit_name(
     size_t right_length
 ) {
     if (left_length == right_length) {
-        size_t mismatch = SIZE_MAX;
+        size_t first = SIZE_MAX;
+        size_t second = SIZE_MAX;
         size_t count = 0;
 
         for (
@@ -563,7 +564,12 @@ static bool one_edit_name(
             i++
         ) {
             if (left[i] != right[i]) {
-                mismatch = i;
+                if (count == 0) {
+                    first = i;
+                } else if (count == 1) {
+                    second = i;
+                }
+
                 count++;
 
                 if (count > 2) {
@@ -576,23 +582,13 @@ static bool one_edit_name(
             return true;
         }
 
-        if (
+        return
             count == 2 &&
-            mismatch > 0
-        ) {
-            size_t first =
-                mismatch - 1;
-            size_t second =
-                mismatch;
-
-            return
-                left[first] ==
-                    right[second] &&
-                left[second] ==
-                    right[first];
-        }
-
-        return false;
+            second == first + 1 &&
+            left[first] ==
+                right[second] &&
+            left[second] ==
+                right[first];
     }
 
     const char *shorter = left;
