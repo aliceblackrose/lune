@@ -1,7 +1,13 @@
-.PHONY: all test bench bench-build clean
+.PHONY: all bootstrap selfhost-images test bench bench-build clean
 
 all:
 	$(MAKE) -C bootstrap all
+
+bootstrap:
+	$(MAKE) -C bootstrap bootstrap
+
+selfhost-images:
+	$(MAKE) -C bootstrap selfhost-images
 
 test:
 	$(MAKE) -C bootstrap test
