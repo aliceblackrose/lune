@@ -564,6 +564,497 @@ static int compile_file(
     return ok ? 0 : 1;
 }
 
+typedef struct {
+    char *data;
+    size_t count;
+    size_t capacity;
+} ReplBuffer;
+
+typedef struct {
+    LuneChunk **items;
+    size_t count;
+    size_t capacity;
+} ReplChunks;
+
+static void repl_buffer_clear(
+    ReplBuffer *buffer
+) {
+    buffer->count = 0;
+
+    if (buffer->data != NULL) {
+        buffer->data[0] = '\0';
+    }
+}
+
+static bool repl_buffer_append(
+    ReplBuffer *buffer,
+    const char *text,
+    size_t length
+) {
+    if (
+        length >
+        SIZE_MAX -
+            buffer->count -
+            1
+    ) {
+        return false;
+    }
+
+    size_t needed =
+        buffer->count +
+        length +
+        1;
+
+    if (needed > buffer->capacity) {
+        size_t next =
+            buffer->capacity == 0
+            ? 256
+            : buffer->capacity;
+
+        while (next < needed) {
+            if (next > SIZE_MAX / 2) {
+                next = needed;
+                break;
+            }
+
+            next *= 2;
+        }
+
+        char *grown = realloc(
+            buffer->data,
+            next
+        );
+
+        if (grown == NULL) {
+            return false;
+        }
+
+        buffer->data = grown;
+        buffer->capacity = next;
+    }
+
+    memcpy(
+        buffer->data + buffer->count,
+        text,
+        length
+    );
+
+    buffer->count += length;
+    buffer->data[buffer->count] = '\0';
+    return true;
+}
+
+static char *repl_read_line(
+    const char *prompt
+) {
+    fputs(prompt, stderr);
+    fflush(stderr);
+
+    size_t capacity = 128;
+    size_t count = 0;
+    char *line = malloc(capacity);
+
+    if (line == NULL) {
+        return NULL;
+    }
+
+    int c;
+
+    while (
+        (c = fgetc(stdin)) != EOF
+    ) {
+        if (count + 2 > capacity) {
+            if (
+                capacity >
+                SIZE_MAX / 2
+            ) {
+                free(line);
+                return NULL;
+            }
+
+            capacity *= 2;
+            char *grown = realloc(
+                line, capacity
+            );
+
+            if (grown == NULL) {
+                free(line);
+                return NULL;
+            }
+
+            line = grown;
+        }
+
+        line[count++] = (char)c;
+
+        if (c == '\n') {
+            break;
+        }
+    }
+
+    if (
+        c == EOF &&
+        count == 0
+    ) {
+        free(line);
+        return NULL;
+    }
+
+    if (
+        count == 0 ||
+        line[count - 1] != '\n'
+    ) {
+        line[count++] = '\n';
+    }
+
+    line[count] = '\0';
+    return line;
+}
+
+static int repl_delimiter_depth(
+    const char *text,
+    size_t length
+) {
+    int depth = 0;
+    bool string = false;
+    bool escape = false;
+    bool comment = false;
+
+    for (
+        size_t i = 0;
+        i < length;
+        i++
+    ) {
+        unsigned char c =
+            (unsigned char)text[i];
+
+        if (comment) {
+            if (c == '\n') {
+                comment = false;
+            }
+            continue;
+        }
+
+        if (string) {
+            if (escape) {
+                escape = false;
+            } else if (c == '\\') {
+                escape = true;
+            } else if (c == '"') {
+                string = false;
+            }
+            continue;
+        }
+
+        if (
+            c == '/' &&
+            i + 1 < length &&
+            text[i + 1] == '/'
+        ) {
+            comment = true;
+            i++;
+            continue;
+        }
+
+        if (c == '"') {
+            string = true;
+        } else if (
+            c == '(' ||
+            c == '[' ||
+            c == '{'
+        ) {
+            depth++;
+        } else if (
+            c == ')' ||
+            c == ']' ||
+            c == '}'
+        ) {
+            depth--;
+        }
+    }
+
+    return depth;
+}
+
+static bool repl_chunks_push(
+    ReplChunks *chunks,
+    LuneChunk *chunk
+) {
+    if (
+        chunks->count ==
+        chunks->capacity
+    ) {
+        size_t next =
+            chunks->capacity == 0
+            ? 16
+            : chunks->capacity * 2;
+
+        if (
+            next <
+                chunks->capacity ||
+            next >
+                SIZE_MAX /
+                sizeof(*chunks->items)
+        ) {
+            return false;
+        }
+
+        LuneChunk **grown = realloc(
+            chunks->items,
+            next * sizeof(*grown)
+        );
+
+        if (grown == NULL) {
+            return false;
+        }
+
+        chunks->items = grown;
+        chunks->capacity = next;
+    }
+
+    chunks->items[
+        chunks->count++
+    ] = chunk;
+
+    return true;
+}
+
+static void repl_chunks_free(
+    ReplChunks *chunks
+) {
+    for (
+        size_t i = 0;
+        i < chunks->count;
+        i++
+    ) {
+        lune_chunk_free(
+            chunks->items[i]
+        );
+        free(chunks->items[i]);
+    }
+
+    free(chunks->items);
+    *chunks = (ReplChunks){0};
+}
+
+static int run_repl(
+    ProductionCompiler *compiler
+) {
+    char error[256] = {0};
+    char *source_path = NULL;
+
+    if (!lune_platform_temp_file(
+        &source_path,
+        error,
+        sizeof(error)
+    )) {
+        fprintf(
+            stderr,
+            "lune: error: %s\n",
+            error
+        );
+        return 1;
+    }
+
+    LuneVM *vm = lune_vm_new(
+        print_diagnostic,
+        (void *)"<repl>"
+    );
+
+    if (vm == NULL) {
+        (void)remove(source_path);
+        free(source_path);
+        fputs(
+            "lune: error: out of memory\n",
+            stderr
+        );
+        return 1;
+    }
+
+    lune_vm_set_script_path(
+        vm, "repl.lune"
+    );
+
+    lune_vm_set_source_compiler(
+        vm,
+        compile_source,
+        compiler
+    );
+
+    ReplBuffer source = {0};
+    ReplChunks chunks = {0};
+    int status = 0;
+
+    for (;;) {
+        const char *prompt =
+            source.count == 0
+            ? "> "
+            : "... ";
+
+        char *line =
+            repl_read_line(prompt);
+
+        if (line == NULL) {
+            break;
+        }
+
+        if (
+            source.count == 0 &&
+            (
+                strcmp(line, ":quit\n") == 0 ||
+                strcmp(line, ":exit\n") == 0
+            )
+        ) {
+            free(line);
+            break;
+        }
+
+        size_t line_length =
+            strlen(line);
+
+        if (
+            source.count == 0 &&
+            (
+                line_length == 1 &&
+                line[0] == '\n'
+            )
+        ) {
+            free(line);
+            continue;
+        }
+
+        if (!repl_buffer_append(
+            &source,
+            line,
+            line_length
+        )) {
+            free(line);
+            status = 1;
+            fputs(
+                "lune: error: out of memory\n",
+                stderr
+            );
+            break;
+        }
+
+        free(line);
+
+        if (
+            repl_delimiter_depth(
+                source.data,
+                source.count
+            ) > 0
+        ) {
+            continue;
+        }
+
+        if (!lune_platform_write_file(
+            source_path,
+            source.data,
+            source.count,
+            error,
+            sizeof(error)
+        )) {
+            fprintf(
+                stderr,
+                "lune: error: %s\n",
+                error
+            );
+            status = 1;
+            repl_buffer_clear(&source);
+            continue;
+        }
+
+        LuneChunk *chunk =
+            malloc(sizeof(*chunk));
+
+        if (chunk == NULL) {
+            status = 1;
+            fputs(
+                "lune: error: out of memory\n",
+                stderr
+            );
+            break;
+        }
+
+        lune_chunk_init(chunk);
+        error[0] = '\0';
+
+        if (!compile_source(
+            compiler,
+            source_path,
+            false,
+            chunk,
+            error,
+            sizeof(error)
+        )) {
+            if (error[0] != '\0') {
+                fprintf(
+                    stderr,
+                    "<repl>: error: %s\n",
+                    error
+                );
+            }
+
+            lune_chunk_free(chunk);
+            free(chunk);
+            repl_buffer_clear(&source);
+            continue;
+        }
+
+        if (!repl_chunks_push(
+            &chunks, chunk
+        )) {
+            lune_chunk_free(chunk);
+            free(chunk);
+            status = 1;
+            fputs(
+                "lune: error: out of memory\n",
+                stderr
+            );
+            break;
+        }
+
+        LuneValue result =
+            lune_value_null();
+
+        bool ok =
+            lune_vm_run_incremental(
+                vm,
+                chunk,
+                &result
+            );
+
+        int exit_status = 0;
+        bool requested_exit =
+            lune_vm_exit_status(
+                vm, &exit_status
+            );
+
+        if (ok && !requested_exit) {
+            lune_value_print(
+                stdout, result
+            );
+            putchar('\n');
+            fflush(stdout);
+        }
+
+        repl_buffer_clear(&source);
+
+        if (requested_exit) {
+            status = exit_status;
+            break;
+        }
+    }
+
+    lune_vm_free(vm);
+    repl_chunks_free(&chunks);
+    free(source.data);
+    (void)remove(source_path);
+    free(source_path);
+    return status;
+}
+
 static void usage(
     const char *program
 ) {
@@ -571,9 +1062,11 @@ static void usage(
         stderr,
         "usage:\n"
         "  %s FILE [ARGS...]\n"
+        "  %s repl\n"
         "  %s check FILE\n"
         "  %s compile FILE\n"
         "  %s <run|eval|runbc|evalbc> FILE [ARGS...]\n",
+        program,
         program,
         program,
         program,
@@ -591,6 +1084,7 @@ int main(
     }
 
     bool direct_run =
+        strcmp(argv[1], "repl") != 0 &&
         strcmp(argv[1], "check") != 0 &&
         strcmp(argv[1], "compile") != 0 &&
         strcmp(argv[1], "run") != 0 &&
@@ -598,8 +1092,20 @@ int main(
         strcmp(argv[1], "runbc") != 0 &&
         strcmp(argv[1], "evalbc") != 0;
 
+    bool repl_command =
+        strcmp(argv[1], "repl") == 0;
+
+    if (
+        repl_command &&
+        argc != 2
+    ) {
+        usage(argv[0]);
+        return 2;
+    }
+
     if (
         !direct_run &&
+        !repl_command &&
         (
             strcmp(argv[1], "check") == 0 ||
             strcmp(argv[1], "compile") == 0
@@ -612,6 +1118,7 @@ int main(
 
     if (
         !direct_run &&
+        !repl_command &&
         argc < 3
     ) {
         usage(argv[0]);
@@ -635,7 +1142,11 @@ int main(
 
     int result = 2;
 
-    if (direct_run) {
+    if (repl_command) {
+        result = run_repl(
+            &compiler
+        );
+    } else if (direct_run) {
         if (ends_with(
             argv[1], ".lbc"
         )) {
