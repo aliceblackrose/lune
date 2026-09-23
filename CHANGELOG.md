@@ -47,6 +47,7 @@ Lune 0.1 is the first self-hosted release.
 - Runtime source excerpts and caller stack traces.
 - Conservative one-edit name suggestions only when the correction is unique.
 - Declarative VS Code language support and TextMate syntax highlighting.
+- Dependency-free Python LSP adapter for production-compiler diagnostics and stable formatting.
 - Relocatable POSIX install layout.
 
 ### Quality and reproducibility
