@@ -464,9 +464,14 @@ LuneObjString *lune_string_new(
         return NULL;
     }
 
-    memcpy(
-        string->chars, chars, length
-    );
+    if (length > 0) {
+        memcpy(
+            string->chars,
+            chars,
+            length
+        );
+    }
+
     string->chars[length] = '\0';
     string->length = length;
 
