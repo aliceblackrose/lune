@@ -2,7 +2,7 @@
 #define LUNE_VM_H
 
 #include "bytecode.h"
-#include "lexer.h"
+#include "source.h"
 #include "value.h"
 
 #include <stdbool.h>
