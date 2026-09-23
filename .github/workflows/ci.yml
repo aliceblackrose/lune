@@ -45,3 +45,23 @@ jobs:
         run: |
           make clean
           make test CFLAGS='-std=c17 -O1 -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer'
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            diffutils
+            make
+            mingw-w64-x86_64-gcc
+
+      - name: Build and test
+        shell: msys2 {0}
+        run: make test
+
