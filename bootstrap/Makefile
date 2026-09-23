@@ -3,9 +3,9 @@ CFLAGS ?= -std=c17 -O2 -Wall -Wextra -Wpedantic -Werror
 
 BUILD := build
 SELFHOST := $(BUILD)/selfhost
-FRONTEND := lexer.c ast.c parser.c
-RUNTIME := value.c object.c bytecode.c bytecode_image.c compiler.c platform.c vm.c
-COMMON := $(FRONTEND) $(RUNTIME)
+FRONTEND := lexer.c ast.c parser.c compiler.c native_compile.c
+CORE := value.c object.c bytecode.c bytecode_image.c platform.c vm.c
+COMMON := $(FRONTEND) $(CORE)
 SELFHOST_SOURCES := \
 	../compiler/lexer.lune \
 	../compiler/parser.lune \
@@ -22,7 +22,7 @@ bootstrap: $(BUILD)/lune-bootstrap
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(BUILD)/lune-bootstrap: main.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h bytecode_image.h compiler.h platform.h vm.h | $(BUILD)
+$(BUILD)/lune-bootstrap: main.c $(COMMON) source.h lexer.h ast.h parser.h value.h object.h bytecode.h bytecode_image.h compiler.h native_compile.h platform.h vm.h | $(BUILD)
 	$(CC) $(CFLAGS) main.c $(COMMON) -o $@
 
 $(SELFHOST)/.stamp: $(BUILD)/lune-bootstrap $(SELFHOST_SOURCES)
@@ -37,8 +37,8 @@ $(SELFHOST)/.stamp: $(BUILD)/lune-bootstrap $(SELFHOST_SOURCES)
 
 selfhost-images: $(SELFHOST)/.stamp
 
-$(BUILD)/lune: production.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h bytecode_image.h compiler.h platform.h vm.h $(SELFHOST)/.stamp | $(BUILD)
-	$(CC) $(CFLAGS) production.c $(COMMON) -o $@
+$(BUILD)/lune: production.c $(CORE) source.h value.h object.h bytecode.h bytecode_image.h platform.h vm.h $(SELFHOST)/.stamp | $(BUILD)
+	$(CC) $(CFLAGS) production.c $(CORE) -o $@
 
 $(BUILD)/test-lexer: test_lexer.c lexer.c lexer.h | $(BUILD)
 	$(CC) $(CFLAGS) test_lexer.c lexer.c -o $@
@@ -46,10 +46,10 @@ $(BUILD)/test-lexer: test_lexer.c lexer.c lexer.h | $(BUILD)
 $(BUILD)/test-parser: test_parser.c $(FRONTEND) lexer.h ast.h parser.h | $(BUILD)
 	$(CC) $(CFLAGS) test_parser.c $(FRONTEND) -o $@
 
-$(BUILD)/test-vm: test_vm.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h bytecode_image.h compiler.h platform.h vm.h | $(BUILD)
+$(BUILD)/test-vm: test_vm.c $(COMMON) source.h lexer.h ast.h parser.h value.h object.h bytecode.h bytecode_image.h compiler.h native_compile.h platform.h vm.h | $(BUILD)
 	$(CC) $(CFLAGS) test_vm.c $(COMMON) -o $@
 
-$(BUILD)/bench: ../bench/bench.c $(COMMON) lexer.h ast.h parser.h value.h object.h bytecode.h bytecode_image.h compiler.h platform.h vm.h | $(BUILD)
+$(BUILD)/bench: ../bench/bench.c $(COMMON) source.h lexer.h ast.h parser.h value.h object.h bytecode.h bytecode_image.h compiler.h native_compile.h platform.h vm.h | $(BUILD)
 	$(CC) $(CFLAGS) -I. ../bench/bench.c $(COMMON) -o $@
 
 bench-build: $(BUILD)/bench
