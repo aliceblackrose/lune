@@ -59,6 +59,199 @@ static bool load_bytecode_file(
     return ok;
 }
 
+static void print_source_excerpt(
+    const char *path,
+    LuneSpan span
+) {
+    if (
+        path == NULL ||
+        path[0] == '<'
+    ) {
+        return;
+    }
+
+    size_t path_length =
+        strlen(path);
+
+    if (
+        path_length >= 4 &&
+        memcmp(
+            path + path_length - 4,
+            ".lbc",
+            4
+        ) == 0
+    ) {
+        return;
+    }
+
+    char *source = NULL;
+    size_t length = 0;
+    char error[256];
+
+    if (!lune_platform_read_file(
+        path,
+        &source,
+        &length,
+        error,
+        sizeof(error)
+    )) {
+        return;
+    }
+
+    size_t offset =
+        span.offset <= length
+        ? span.offset
+        : length;
+
+    size_t line_start = offset;
+
+    while (
+        line_start > 0 &&
+        source[line_start - 1] != '\n'
+    ) {
+        line_start--;
+    }
+
+    size_t line_end = offset;
+
+    while (
+        line_end < length &&
+        source[line_end] != '\n'
+    ) {
+        line_end++;
+    }
+
+    if (
+        line_end > line_start &&
+        source[line_end - 1] == '\r'
+    ) {
+        line_end--;
+    }
+
+    fputs("  ", stderr);
+    fwrite(
+        source + line_start,
+        1,
+        line_end - line_start,
+        stderr
+    );
+    fputc('\n', stderr);
+
+    fputs("  ", stderr);
+
+    for (
+        size_t i = line_start;
+        i < offset && i < line_end;
+        i++
+    ) {
+        fputc(
+            source[i] == '\t'
+                ? '\t'
+                : ' ',
+            stderr
+        );
+    }
+
+    size_t available =
+        line_end > offset
+        ? line_end - offset
+        : 0;
+
+    size_t marker_length =
+        span.length > 0
+        ? span.length
+        : 1;
+
+    if (
+        available > 0 &&
+        marker_length > available
+    ) {
+        marker_length = available;
+    }
+
+    if (marker_length == 0) {
+        marker_length = 1;
+    }
+
+    for (
+        size_t i = 0;
+        i < marker_length;
+        i++
+    ) {
+        fputc('^', stderr);
+    }
+
+    fputc('\n', stderr);
+    free(source);
+}
+
+static void print_runtime_failure(
+    const LuneVM *vm,
+    const char *fallback_path
+) {
+    LuneRuntimeError error;
+
+    if (!lune_vm_last_error(
+        vm, &error
+    )) {
+        return;
+    }
+
+    const char *path =
+        error.path != NULL
+        ? error.path
+        : fallback_path;
+
+    fprintf(
+        stderr,
+        "%s:%zu:%zu: error: %s\n",
+        path != NULL
+            ? path
+            : "<runtime>",
+        error.span.line,
+        error.span.column,
+        error.message
+    );
+
+    print_source_excerpt(
+        path, error.span
+    );
+
+    size_t count =
+        lune_vm_trace_count(vm);
+
+    if (count > 1) {
+        fputs(
+            "stack trace:\n",
+            stderr
+        );
+
+        for (
+            size_t i = 1;
+            i < count;
+            i++
+        ) {
+            LuneTraceFrame frame;
+
+            if (!lune_vm_trace_frame(
+                vm, i, &frame
+            )) {
+                continue;
+            }
+
+            fprintf(
+                stderr,
+                "  at %s:%zu:%zu\n",
+                frame.path != NULL
+                    ? frame.path
+                    : "<runtime>",
+                frame.span.line,
+                frame.span.column
+            );
+        }
+    }
+}
+
 static bool run_compiler_stage(
     const ProductionCompiler *compiler,
     const char *source_path,
@@ -305,8 +498,8 @@ static int execute_chunk(
     const char *const *process_argv
 ) {
     LuneVM *vm = lune_vm_new(
-        print_diagnostic,
-        (void *)path
+        NULL,
+        NULL
     );
 
     if (vm == NULL) {
@@ -342,6 +535,12 @@ static int execute_chunk(
         chunk,
         &result
     );
+
+    if (!ok) {
+        print_runtime_failure(
+            vm, path
+        );
+    }
 
     int exit_status = 0;
     bool requested_exit =
