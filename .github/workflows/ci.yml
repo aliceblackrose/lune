@@ -19,8 +19,19 @@ jobs:
       - name: Build and test
         run: make test
 
+      - name: Verify install layout
+        run: |
+          make install DESTDIR="$PWD/.install-root"
+          ./.install-root/usr/local/bin/lune examples/hello.lune | grep -qx 'hello, world'
+          ./.install-root/usr/local/bin/lune check examples/functions.lune
+          make uninstall DESTDIR="$PWD/.install-root"
+          test ! -e ./.install-root/usr/local/bin/lune
+
       - name: Build benchmark harness
         run: make bench-build
+
+      - name: Performance baseline
+        run: make bench
 
       - name: Sanitizers
         env:
