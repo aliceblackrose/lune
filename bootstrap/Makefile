@@ -114,7 +114,70 @@ test-production: $(BUILD)/lune
 	cmp $(BUILD)/fmt-case.lune ../tests/fmt/expected.lune
 	./$(BUILD)/lune check $(BUILD)/fmt-case.lune
 	printf '%s\n' 'make := fn(x) => {' '  fn() => x' '}' 'f := make(42)' 'f()' ':quit' | ./$(BUILD)/lune repl > $(BUILD)/repl.out
-	tail -n 1 $(BUILD)/repl.out | grep -qx '42'
+	tail -n 1 $(BUILD)/repl.out | grep -Eq '^42\r?
+	@if ./$(BUILD)/lune ../tests/runtime/stack-trace.lune >$(BUILD)/trace.out 2>$(BUILD)/trace.err; then echo "FAIL: stack trace fixture unexpectedly succeeded"; exit 1; fi
+	grep -Eq 'stack-trace\.lune:1:[0-9]+: error: division by zero' $(BUILD)/trace.err
+	grep -Fq '  inner := fn() => 1 / 0' $(BUILD)/trace.err
+	grep -Fq 'stack trace:' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:2:[0-9]+' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:3:[0-9]+' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:4:[0-9]+' $(BUILD)/trace.err
+	@if ./$(BUILD)/lune ../tests/runtime/trace-module/main.lune >$(BUILD)/module-trace.out 2>$(BUILD)/module-trace.err; then echo "FAIL: module trace fixture unexpectedly succeeded"; exit 1; fi
+	grep -Eq 'trace-module/child\.lune:1:[0-9]+: error: division by zero' $(BUILD)/module-trace.err
+	grep -Fq '  fail := fn() => 1 / 0' $(BUILD)/module-trace.err
+	grep -Eq '  at .*trace-module/main\.lune:2:[0-9]+' $(BUILD)/module-trace.err
+	@if ./$(BUILD)/lune ../tests/runtime/suggest-global.lune >$(BUILD)/suggest.out 2>$(BUILD)/suggest.err; then echo "FAIL: suggestion fixture unexpectedly succeeded"; exit 1; fi
+	grep -Fq "did you mean 'print'?" $(BUILD)/suggest.err
+	@if ./$(BUILD)/lune ../tests/runtime/ambiguous-global.lune >$(BUILD)/ambiguous.out 2>$(BUILD)/ambiguous.err; then echo "FAIL: ambiguous suggestion fixture unexpectedly succeeded"; exit 1; fi
+	grep -Fq "unknown global 'cit'" $(BUILD)/ambiguous.err
+	@if grep -Fq 'did you mean' $(BUILD)/ambiguous.err; then echo "FAIL: ambiguous global emitted a suggestion"; exit 1; fi
+	./$(BUILD)/lune run ../tests/runtime/source-import/main.lune
+	./$(BUILD)/lune eval ../tests/runtime/source-import/main.lune | grep -Eq '^42\r?
+
+test: $(BUILD)/test-lexer $(BUILD)/test-parser $(BUILD)/test-vm test-syntax test-examples test-selfhost test-bootstrap test-production
+	./$(BUILD)/test-lexer
+	./$(BUILD)/test-parser
+	./$(BUILD)/test-vm
+
+clean:
+	rm -rf $(BUILD)
+
+	@if ./$(BUILD)/lune ../tests/runtime/stack-trace.lune >$(BUILD)/trace.out 2>$(BUILD)/trace.err; then echo "FAIL: stack trace fixture unexpectedly succeeded"; exit 1; fi
+	grep -Eq 'stack-trace\.lune:1:[0-9]+: error: division by zero' $(BUILD)/trace.err
+	grep -Fq '  inner := fn() => 1 / 0' $(BUILD)/trace.err
+	grep -Fq 'stack trace:' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:2:[0-9]+' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:3:[0-9]+' $(BUILD)/trace.err
+	grep -Eq '  at .*stack-trace\.lune:4:[0-9]+' $(BUILD)/trace.err
+	@if ./$(BUILD)/lune ../tests/runtime/trace-module/main.lune >$(BUILD)/module-trace.out 2>$(BUILD)/module-trace.err; then echo "FAIL: module trace fixture unexpectedly succeeded"; exit 1; fi
+	grep -Eq 'trace-module/child\.lune:1:[0-9]+: error: division by zero' $(BUILD)/module-trace.err
+	grep -Fq '  fail := fn() => 1 / 0' $(BUILD)/module-trace.err
+	grep -Eq '  at .*trace-module/main\.lune:2:[0-9]+' $(BUILD)/module-trace.err
+	@if ./$(BUILD)/lune ../tests/runtime/suggest-global.lune >$(BUILD)/suggest.out 2>$(BUILD)/suggest.err; then echo "FAIL: suggestion fixture unexpectedly succeeded"; exit 1; fi
+	grep -Fq "did you mean 'print'?" $(BUILD)/suggest.err
+	@if ./$(BUILD)/lune ../tests/runtime/ambiguous-global.lune >$(BUILD)/ambiguous.out 2>$(BUILD)/ambiguous.err; then echo "FAIL: ambiguous suggestion fixture unexpectedly succeeded"; exit 1; fi
+	grep -Fq "unknown global 'cit'" $(BUILD)/ambiguous.err
+	@if grep -Fq 'did you mean' $(BUILD)/ambiguous.err; then echo "FAIL: ambiguous global emitted a suggestion"; exit 1; fi
+	./$(BUILD)/lune run ../tests/runtime/source-import/main.lune
+	./$(BUILD)/lune eval ../tests/runtime/source-import/main.lune | grep -qx '42'
+
+test: $(BUILD)/test-lexer $(BUILD)/test-parser $(BUILD)/test-vm test-syntax test-examples test-selfhost test-bootstrap test-production
+	./$(BUILD)/test-lexer
+	./$(BUILD)/test-parser
+	./$(BUILD)/test-vm
+
+clean:
+	rm -rf $(BUILD)
+
+
+test: $(BUILD)/test-lexer $(BUILD)/test-parser $(BUILD)/test-vm test-syntax test-examples test-selfhost test-bootstrap test-production
+	./$(BUILD)/test-lexer
+	./$(BUILD)/test-parser
+	./$(BUILD)/test-vm
+
+clean:
+	rm -rf $(BUILD)
+
 	@if ./$(BUILD)/lune ../tests/runtime/stack-trace.lune >$(BUILD)/trace.out 2>$(BUILD)/trace.err; then echo "FAIL: stack trace fixture unexpectedly succeeded"; exit 1; fi
 	grep -Eq 'stack-trace\.lune:1:[0-9]+: error: division by zero' $(BUILD)/trace.err
 	grep -Fq '  inner := fn() => 1 / 0' $(BUILD)/trace.err
