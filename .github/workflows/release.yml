@@ -80,7 +80,7 @@ jobs:
           cp bootstrap/build/lune.exe dist/package/lune-windows-x86_64/lune.exe
           cp bootstrap/build/selfhost/*.lbc dist/package/lune-windows-x86_64/selfhost/
 
-          ./dist/package/lune-windows-x86_64/lune.exe ../lune/examples/hello.lune 2>/dev/null ||             ./dist/package/lune-windows-x86_64/lune.exe examples/hello.lune
+          ./dist/package/lune-windows-x86_64/lune.exe examples/hello.lune | grep -qx 'hello, world'
 
       - name: Package Windows bundle
         shell: pwsh
