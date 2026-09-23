@@ -459,16 +459,16 @@ lune fmt file.lune
 lune compile file.lune
 ```
 
-- [ ] Script runner.
+- [x] Script runner.
 - [ ] REPL.
-- [ ] Syntax checker.
+- [x] Syntax checker.
 - [ ] Formatter.
-- [ ] Bytecode compilation.
-- [ ] Bytecode execution.
+- [x] Bytecode compilation.
+- [x] Bytecode execution.
 
 ### Diagnostics
 
-- [ ] Filename, line, and column.
+- [x] Filename, line, and column.
 - [ ] Source excerpt.
 - [ ] Highlight exact error span.
 - [ ] Human-readable parser errors.
