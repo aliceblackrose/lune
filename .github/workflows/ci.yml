@@ -19,6 +19,11 @@ jobs:
       - name: Build and test
         run: make test
 
+      - name: Language server tests
+        run: |
+          python3 -m py_compile editors/lsp/lune_lsp.py editors/lsp/test_lune_lsp.py
+          python3 editors/lsp/test_lune_lsp.py
+
       - name: Verify install layout
         run: |
           make install DESTDIR="$PWD/.install-root"
