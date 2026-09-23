@@ -1,0 +1,3 @@
+# Lune source and golden formatter fixtures are byte-sensitive.
+# Keep them LF-only on every platform so formatter output compares deterministically.
+*.lune text eol=lf
