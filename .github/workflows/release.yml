@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish release
+  linux:
+    name: Build Linux x86-64
     runs-on: ubuntu-latest
 
     steps:
@@ -39,9 +39,93 @@ jobs:
 
           tar -C dist/package -czf dist/lune-linux-x86_64.tar.gz lune-linux-x86_64
 
+      - name: Upload Linux release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x86_64
+          path: |
+            dist/lune-linux-x86_64
+            dist/lune-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows x86-64
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            mingw-w64-x86_64-gcc
+
+      - name: Run test suite and build release artifacts
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+
+          make test
+          make clean
+          make
+
+          mkdir -p dist/package/lune-windows-x86_64/selfhost
+
+          cp bootstrap/build/lune.exe dist/lune-windows-x86_64.exe
+          cp bootstrap/build/lune.exe dist/package/lune-windows-x86_64/lune.exe
+          cp bootstrap/build/selfhost/*.lbc dist/package/lune-windows-x86_64/selfhost/
+
+          ./dist/package/lune-windows-x86_64/lune.exe examples/hello.lune | grep -qx 'hello, world'
+
+      - name: Package Windows bundle
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path "dist/package/lune-windows-x86_64" `
+            -DestinationPath "dist/lune-windows-x86_64.zip"
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-x86_64
+          path: |
+            dist/lune-windows-x86_64.exe
+            dist/lune-windows-x86_64.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - linux
+      - windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
           (
             cd dist
-            sha256sum lune-linux-x86_64 lune-linux-x86_64.tar.gz > SHA256SUMS
+            sha256sum \
+              lune-linux-x86_64 \
+              lune-linux-x86_64.tar.gz \
+              lune-windows-x86_64.exe \
+              lune-windows-x86_64.zip \
+              > SHA256SUMS
           )
 
       - name: Create or update GitHub release
@@ -54,6 +138,8 @@ jobs:
           assets=(
             dist/lune-linux-x86_64
             dist/lune-linux-x86_64.tar.gz
+            dist/lune-windows-x86_64.exe
+            dist/lune-windows-x86_64.zip
             dist/SHA256SUMS
           )
 
