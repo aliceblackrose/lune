@@ -1,9 +1,7 @@
 #include "vm.h"
 
-#include "compiler.h"
 #include "bytecode_image.h"
 #include "object.h"
-#include "parser.h"
 #include "platform.h"
 
 #include <errno.h>
@@ -5194,130 +5192,6 @@ static bool native_json_stringify(
     return ok;
 }
 
-static bool module_compile_wrapper(
-    LuneVM *vm,
-    ModuleEntry *entry,
-    const char *source,
-    size_t source_length
-) {
-    static const char prefix[] =
-        "fn() => {\n";
-    static const char suffix[] =
-        "\n}\n";
-
-    if (
-        source_length >
-        SIZE_MAX -
-            (sizeof(prefix) - 1) -
-            (sizeof(suffix) - 1) -
-            1
-    ) {
-        return native_error(
-            vm,
-            "module source is too large"
-        );
-    }
-
-    size_t wrapped_length =
-        (sizeof(prefix) - 1) +
-        source_length +
-        (sizeof(suffix) - 1);
-
-    char *wrapped =
-        malloc(
-            wrapped_length + 1
-        );
-
-    if (wrapped == NULL) {
-        return native_error(
-            vm, "out of memory"
-        );
-    }
-
-    size_t offset = 0;
-
-    memcpy(
-        wrapped + offset,
-        prefix,
-        sizeof(prefix) - 1
-    );
-
-    offset += sizeof(prefix) - 1;
-
-    memcpy(
-        wrapped + offset,
-        source,
-        source_length
-    );
-
-    offset += source_length;
-
-    memcpy(
-        wrapped + offset,
-        suffix,
-        sizeof(suffix) - 1
-    );
-
-    offset += sizeof(suffix) - 1;
-    wrapped[offset] = '\0';
-
-    LuneParser parser;
-    lune_parser_init(
-        &parser,
-        wrapped,
-        wrapped_length,
-        vm->diagnostic,
-        vm->diagnostic_context
-    );
-
-    LuneAst *ast =
-        lune_parse_program(
-            &parser
-        );
-
-    if (
-        ast == NULL ||
-        parser.had_error
-    ) {
-        lune_ast_free(ast);
-        free(wrapped);
-        return false;
-    }
-
-    LuneChunk *chunk =
-        malloc(sizeof(*chunk));
-
-    if (chunk == NULL) {
-        lune_ast_free(ast);
-        free(wrapped);
-        return native_error(
-            vm, "out of memory"
-        );
-    }
-
-    lune_chunk_init(chunk);
-
-    bool compiled = lune_compile(
-        ast,
-        wrapped,
-        chunk,
-        vm->diagnostic,
-        vm->diagnostic_context
-    );
-
-    lune_ast_free(ast);
-    free(wrapped);
-
-    if (!compiled) {
-        lune_chunk_free(chunk);
-        free(chunk);
-        return false;
-    }
-
-    entry->chunk = chunk;
-    return true;
-}
-
 static bool module_execute_entry(
     LuneVM *vm,
     ModuleEntry *entry,
@@ -5678,13 +5552,11 @@ static bool native_import(
             free(chunk);
         }
     } else {
-        compiled =
-            module_compile_wrapper(
-                vm,
-                entry,
-                source,
-                source_length
-            );
+        free(source);
+        return native_error(
+            vm,
+            "source imports require a source compiler"
+        );
     }
 
     free(source);
