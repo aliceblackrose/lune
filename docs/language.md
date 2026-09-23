@@ -313,7 +313,8 @@ print(config.host)
 
 The bootstrap scripting runtime currently provides a small set of globals. These are library/runtime facilities rather than new core syntax.
 
-- `print(...values)` prints values separated by spaces and returns `null`.
+- `print(...values)` prints values separated by spaces to standard output and returns `null`.
+- `eprint(...values)` prints values separated by spaces to standard error and returns `null`.
 - `type(value)` returns `"null"`, `"bool"`, `"int"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"function"`.
 - `len(value)` returns the length of a string, list, or map. String length is measured in UTF-8 bytes.
 - `str(value)` converts scalar values to strings.
