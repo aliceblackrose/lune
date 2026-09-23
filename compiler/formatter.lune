@@ -225,8 +225,7 @@ format_tokens := fn(tokens) => {
 
         output = output + current
 
-        current_unary :=
-            current == "-" and
+        current_unary := current == "-" and
             unary_context(previous)
 
         previous = current
