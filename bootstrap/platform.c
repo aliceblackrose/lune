@@ -262,6 +262,139 @@ bool lune_platform_canonical_path(
 #endif
 }
 
+
+bool lune_platform_temp_file(
+    char **path,
+    char *error,
+    size_t error_capacity
+) {
+#if defined(_WIN32)
+    char buffer[L_tmpnam];
+
+    if (tmpnam(buffer) == NULL) {
+        set_error(
+            error,
+            error_capacity,
+            "unable to create temporary path"
+        );
+        return false;
+    }
+
+    size_t length = strlen(buffer);
+    char *copy = malloc(length + 1);
+
+    if (copy == NULL) {
+        set_error(
+            error,
+            error_capacity,
+            "out of memory creating temporary path"
+        );
+        return false;
+    }
+
+    memcpy(copy, buffer, length + 1);
+
+    FILE *file = fopen(copy, "wb");
+
+    if (file == NULL) {
+        set_error(
+            error,
+            error_capacity,
+            "unable to create temporary file: %s",
+            strerror(errno)
+        );
+        free(copy);
+        return false;
+    }
+
+    fclose(file);
+    *path = copy;
+    return true;
+#else
+    const char *directory =
+        getenv("TMPDIR");
+
+    if (
+        directory == NULL ||
+        directory[0] == '\0'
+    ) {
+        directory = "/tmp";
+    }
+
+    static const char suffix[] =
+        "/lune-XXXXXX";
+
+    size_t directory_length =
+        strlen(directory);
+
+    if (
+        directory_length >
+        SIZE_MAX - sizeof(suffix)
+    ) {
+        set_error(
+            error,
+            error_capacity,
+            "temporary path is too large"
+        );
+        return false;
+    }
+
+    char *template =
+        malloc(
+            directory_length +
+            sizeof(suffix)
+        );
+
+    if (template == NULL) {
+        set_error(
+            error,
+            error_capacity,
+            "out of memory creating temporary path"
+        );
+        return false;
+    }
+
+    memcpy(
+        template,
+        directory,
+        directory_length
+    );
+    memcpy(
+        template + directory_length,
+        suffix,
+        sizeof(suffix)
+    );
+
+    int fd = mkstemp(template);
+
+    if (fd < 0) {
+        set_error(
+            error,
+            error_capacity,
+            "unable to create temporary file: %s",
+            strerror(errno)
+        );
+        free(template);
+        return false;
+    }
+
+    if (close(fd) != 0) {
+        set_error(
+            error,
+            error_capacity,
+            "unable to close temporary file: %s",
+            strerror(errno)
+        );
+        (void)remove(template);
+        free(template);
+        return false;
+    }
+
+    *path = template;
+    return true;
+#endif
+}
+
 #if !defined(_WIN32)
 
 static bool read_capture(
