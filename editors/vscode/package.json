@@ -1,0 +1,36 @@
+{
+  "name": "lune-language",
+  "displayName": "Lune Language",
+  "description": "Syntax highlighting and editor configuration for the Lune scripting language.",
+  "version": "0.1.0",
+  "publisher": "lune-lang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "lune",
+        "aliases": [
+          "Lune",
+          "lune"
+        ],
+        "extensions": [
+          ".lune"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lune",
+        "scopeName": "source.lune",
+        "path": "./syntaxes/lune.tmLanguage.json"
+      }
+    ]
+  }
+}
