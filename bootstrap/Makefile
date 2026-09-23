@@ -126,6 +126,11 @@ test-production: $(BUILD)/lune
 	grep -Eq 'trace-module/child\.lune:1:[0-9]+: error: division by zero' $(BUILD)/module-trace.err
 	grep -Fq '  fail := fn() => 1 / 0' $(BUILD)/module-trace.err
 	grep -Eq '  at .*trace-module/main\.lune:2:[0-9]+' $(BUILD)/module-trace.err
+	@if ./$(BUILD)/lune ../tests/runtime/suggest-global.lune >$(BUILD)/suggest.out 2>$(BUILD)/suggest.err; then echo "FAIL: suggestion fixture unexpectedly succeeded"; exit 1; fi
+	grep -Fq "did you mean 'print'?" $(BUILD)/suggest.err
+	@if ./$(BUILD)/lune ../tests/runtime/ambiguous-global.lune >$(BUILD)/ambiguous.out 2>$(BUILD)/ambiguous.err; then echo "FAIL: ambiguous suggestion fixture unexpectedly succeeded"; exit 1; fi
+	grep -Fq "unknown global 'cit'" $(BUILD)/ambiguous.err
+	@if grep -Fq 'did you mean' $(BUILD)/ambiguous.err; then echo "FAIL: ambiguous global emitted a suggestion"; exit 1; fi
 	./$(BUILD)/lune run ../tests/runtime/source-import/main.lune
 	./$(BUILD)/lune eval ../tests/runtime/source-import/main.lune | grep -qx '42'
 
