@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure fresh-process startup for the Lune bootstrap executable."""
+"""Measure fresh-process startup for the production Lune executable."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import time
 
 def main() -> int:
     root = pathlib.Path(__file__).resolve().parent.parent
-    binary = root / "bootstrap" / "build" / "lune-bootstrap"
+    binary = root / "bootstrap" / "build" / "lune"
     script = root / "examples" / "scalars.lune"
 
     if len(sys.argv) > 1:
