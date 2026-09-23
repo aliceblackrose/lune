@@ -469,9 +469,9 @@ lune compile file.lune
 ### Diagnostics
 
 - [x] Filename, line, and column.
-- [ ] Source excerpt.
-- [ ] Highlight exact error span.
-- [ ] Human-readable parser errors.
+- [x] Source excerpt.
+- [x] Highlight exact error span.
+- [x] Human-readable parser errors.
 - [ ] Runtime stack traces.
 - [ ] Suggestions only when they are unambiguous.
 
