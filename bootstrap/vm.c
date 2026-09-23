@@ -546,6 +546,194 @@ static LuneObjNative *as_native(
         value.as.object;
 }
 
+
+static bool one_edit_name(
+    const char *left,
+    size_t left_length,
+    const char *right,
+    size_t right_length
+) {
+    if (left_length == right_length) {
+        size_t mismatch = SIZE_MAX;
+        size_t count = 0;
+
+        for (
+            size_t i = 0;
+            i < left_length;
+            i++
+        ) {
+            if (left[i] != right[i]) {
+                mismatch = i;
+                count++;
+
+                if (count > 2) {
+                    return false;
+                }
+            }
+        }
+
+        if (count == 1) {
+            return true;
+        }
+
+        if (
+            count == 2 &&
+            mismatch > 0
+        ) {
+            size_t first =
+                mismatch - 1;
+            size_t second =
+                mismatch;
+
+            return
+                left[first] ==
+                    right[second] &&
+                left[second] ==
+                    right[first];
+        }
+
+        return false;
+    }
+
+    const char *shorter = left;
+    size_t shorter_length =
+        left_length;
+    const char *longer = right;
+    size_t longer_length =
+        right_length;
+
+    if (
+        left_length >
+        right_length
+    ) {
+        shorter = right;
+        shorter_length =
+            right_length;
+        longer = left;
+        longer_length =
+            left_length;
+    }
+
+    if (
+        longer_length !=
+        shorter_length + 1
+    ) {
+        return false;
+    }
+
+    size_t short_index = 0;
+    size_t long_index = 0;
+    bool skipped = false;
+
+    while (
+        short_index < shorter_length &&
+        long_index < longer_length
+    ) {
+        if (
+            shorter[short_index] ==
+            longer[long_index]
+        ) {
+            short_index++;
+            long_index++;
+        } else if (!skipped) {
+            skipped = true;
+            long_index++;
+        } else {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static const LuneObjString *
+global_suggestion(
+    const LuneVM *vm,
+    const LuneName *name
+) {
+    const LuneObjString *match = NULL;
+
+    if (vm->globals == NULL) {
+        return NULL;
+    }
+
+    for (
+        size_t i = 0;
+        i < vm->globals->count;
+        i++
+    ) {
+        const LuneObjString *candidate =
+            vm->globals->entries[i].key;
+
+        if (!one_edit_name(
+            name->chars,
+            name->length,
+            candidate->chars,
+            candidate->length
+        )) {
+            continue;
+        }
+
+        if (match != NULL) {
+            return NULL;
+        }
+
+        match = candidate;
+    }
+
+    return match;
+}
+
+static bool unknown_global_error(
+    LuneVM *vm,
+    LuneSpan span,
+    const LuneName *name,
+    bool assignment
+) {
+    const LuneObjString *suggestion =
+        global_suggestion(vm, name);
+
+    char message[320];
+
+    int name_length =
+        name->length > 96
+        ? 96
+        : (int)name->length;
+
+    if (suggestion != NULL) {
+        int suggestion_length =
+            suggestion->length > 96
+            ? 96
+            : (int)suggestion->length;
+
+        (void)snprintf(
+            message,
+            sizeof(message),
+            assignment
+                ? "assignment to unknown binding '%.*s'; did you mean '%.*s'?"
+                : "unknown global '%.*s'; did you mean '%.*s'?",
+            name_length,
+            name->chars,
+            suggestion_length,
+            suggestion->chars
+        );
+    } else {
+        (void)snprintf(
+            message,
+            sizeof(message),
+            assignment
+                ? "assignment to unknown binding '%.*s'"
+                : "unknown global '%.*s'",
+            name_length,
+            name->chars
+        );
+    }
+
+    return runtime_error(
+        vm, span, message
+    );
+}
+
 static bool int_add(
     int64_t a,
     int64_t b,
@@ -7758,10 +7946,11 @@ static bool run_until(
                     name->length,
                     &a
                 )) {
-                    return runtime_error(
+                    return unknown_global_error(
                         vm,
                         span,
-                        "unknown global binding"
+                        name,
+                        false
                     );
                 }
 
@@ -7860,10 +8049,11 @@ static bool run_until(
                     name->length,
                     &b
                 )) {
-                    return runtime_error(
+                    return unknown_global_error(
                         vm,
                         span,
-                        "assignment to unknown binding"
+                        name,
+                        true
                     );
                 }
 
