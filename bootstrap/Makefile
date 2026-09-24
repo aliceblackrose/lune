@@ -115,6 +115,9 @@ test-production: $(BUILD)/lune
 	./$(BUILD)/lune check $(BUILD)/fmt-case.lune
 	printf '%s\n' 'make := fn(x) => {' '  fn() => x' '}' 'f := make(42)' 'f()' ':quit' | ./$(BUILD)/lune repl > $(BUILD)/repl.out
 	tail -n 1 $(BUILD)/repl.out | grep -Eq '^42\r?$$'
+	printf '%s\n' 'saved := null' 'fail := fn() => {' '  x := 41' '  saved = fn() => x + 1' '  1 / 0' '}' 'fail()' 'saved()' ':quit' | ./$(BUILD)/lune repl > $(BUILD)/repl-unwind.out 2> $(BUILD)/repl-unwind.err
+	tail -n 1 $(BUILD)/repl-unwind.out | grep -Eq '^42\r?$$'
+	grep -Fq 'division by zero' $(BUILD)/repl-unwind.err
 	@if ./$(BUILD)/lune ../tests/runtime/stack-trace.lune >$(BUILD)/trace.out 2>$(BUILD)/trace.err; then echo "FAIL: stack trace fixture unexpectedly succeeded"; exit 1; fi
 	grep -Eq 'stack-trace\.lune:1:[0-9]+: error: division by zero' $(BUILD)/trace.err
 	grep -Fq '  inner := fn() => 1 / 0' $(BUILD)/trace.err

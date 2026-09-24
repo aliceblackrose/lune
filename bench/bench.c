@@ -475,6 +475,21 @@ int main(void) {
         500000
     ) && ok;
 
+    ok = benchmark_vm(
+        "calls with outer capture",
+        "run := fn() => {\n"
+        "  seed := 7\n"
+        "  get := fn() => seed\n"
+        "  inc := fn(x) => x + 1\n"
+        "  i := 0\n"
+        "  while i < 50000 { i = inc(i) }\n"
+        "  i + get()\n"
+        "}\n"
+        "run()\n",
+        5,
+        50007
+    ) && ok;
+
     if (!ok) {
         fputs(
             "benchmark failed\n",

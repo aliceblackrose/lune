@@ -29,3 +29,8 @@ Do not optimize a subsystem solely because a microbenchmark exists. The benchmar
 The measured runtime optimization pass, tradeoffs, and validation limits are
 recorded in [optimization.md](optimization.md). VM workloads validate their result
 on every run and include large-map lookup and a local-variable integer loop.
+
+For production self-hosted compiler latency, run `python3 bench/production.py`.
+Pass `--baseline /path/to/previous/lune` to alternate before/after binaries, or
+`--json` to retain raw samples. The [frame-owned capture follow-up](closure-optimization.md)
+records the second optimization pass and its validation.

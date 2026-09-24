@@ -605,6 +605,44 @@ int main(void) {
     );
 
     expect_int(
+        "outer-capture-survives-inner-return",
+        "outer := fn() => {\n"
+        "  x := [10]\n"
+        "  get := fn() => x[0]\n"
+        "  inner := fn() => {\n"
+        "    y := [3]\n"
+        "    fn() => {\n"
+        "      x[0] = x[0] + y[0]\n"
+        "      x[0]\n"
+        "    }\n"
+        "  }\n"
+        "  step := inner()\n"
+        "  step()\n"
+        "  x[0] = x[0] + 1\n"
+        "  [get, step]\n"
+        "}\n"
+        "pair := outer()\n"
+        "pair[1]()\n"
+        "pair[0]()\n",
+        17
+    );
+
+    expect_int(
+        "callback-captures-across-frame-reuse",
+        "make := fn() => {\n"
+        "  n := [0]\n"
+        "  getters := map([1,2,3], fn(x) => {\n"
+        "    n[0] = n[0] + x\n"
+        "    fn() => n[0] + x\n"
+        "  })\n"
+        "  getters\n"
+        "}\n"
+        "getters := make()\n"
+        "getters[0]() + getters[1]() + getters[2]()\n",
+        24
+    );
+
+    expect_int(
         "global-recursion",
         "fact := fn(n) => "
         "if n <= 1 { 1 } "

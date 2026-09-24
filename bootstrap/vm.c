@@ -24,6 +24,7 @@ typedef struct {
     LuneObjClosure *closure;
     const char *module_path;
     LuneSpan call_span;
+    LuneObjUpvalue *open_upvalues;
 
     LuneValue locals[LOCAL_MAX];
     bool local_defined[LOCAL_MAX];
@@ -50,7 +51,6 @@ struct LuneVM {
     size_t frame_count;
 
     LuneObjMap *globals;
-    LuneObjUpvalue *open_upvalues;
 
     LuneValue last_result;
     bool has_result;
@@ -232,18 +232,18 @@ static void mark_vm_roots(
                 );
             }
         }
-    }
 
-    for (
-        LuneObjUpvalue *upvalue =
-            vm->open_upvalues;
-        upvalue != NULL;
-        upvalue = upvalue->next_open
-    ) {
-        lune_heap_mark_object(
-            heap,
-            (LuneObj *)upvalue
-        );
+        for (
+            LuneObjUpvalue *upvalue =
+                frame->open_upvalues;
+            upvalue != NULL;
+            upvalue = upvalue->next_open
+        ) {
+            lune_heap_mark_object(
+                heap,
+                (LuneObj *)upvalue
+            );
+        }
     }
 
     if (vm->has_result) {
@@ -1422,11 +1422,12 @@ static bool set_field(
 
 static LuneObjUpvalue *capture_upvalue(
     LuneVM *vm,
+    CallFrame *frame,
     LuneValue *location
 ) {
     for (
         LuneObjUpvalue *upvalue =
-            vm->open_upvalues;
+            frame->open_upvalues;
         upvalue != NULL;
         upvalue =
             upvalue->next_open
@@ -1450,64 +1451,26 @@ static LuneObjUpvalue *capture_upvalue(
     }
 
     upvalue->next_open =
-        vm->open_upvalues;
+        frame->open_upvalues;
 
-    vm->open_upvalues =
+    frame->open_upvalues =
         upvalue;
 
     return upvalue;
 }
 
-static bool upvalue_belongs_to_frame(
-    const LuneObjUpvalue *upvalue,
-    const CallFrame *frame
-) {
-    for (
-        size_t i = 0;
-        i < LOCAL_MAX;
-        i++
-    ) {
-        if (
-            upvalue->location ==
-            &frame->locals[i]
-        ) {
-            return true;
-        }
+/* Each frame owns only the captures that point into its local slots. Returning
+ * from an unrelated call must not scan captures belonging to outer frames. */
+static void close_frame_upvalues(CallFrame *frame) {
+    LuneObjUpvalue *upvalue = frame->open_upvalues;
+    while (upvalue != NULL) {
+        LuneObjUpvalue *next = upvalue->next_open;
+        upvalue->closed = *upvalue->location;
+        upvalue->location = &upvalue->closed;
+        upvalue->next_open = NULL;
+        upvalue = next;
     }
-
-    return false;
-}
-
-static void close_frame_upvalues(
-    LuneVM *vm,
-    CallFrame *frame
-) {
-    LuneObjUpvalue **cursor =
-        &vm->open_upvalues;
-
-    while (*cursor != NULL) {
-        LuneObjUpvalue *upvalue =
-            *cursor;
-
-        if (upvalue_belongs_to_frame(
-            upvalue, frame
-        )) {
-            upvalue->closed =
-                *upvalue->location;
-
-            upvalue->location =
-                &upvalue->closed;
-
-            *cursor =
-                upvalue->next_open;
-
-            upvalue->next_open =
-                NULL;
-        } else {
-            cursor =
-                &upvalue->next_open;
-        }
-    }
+    frame->open_upvalues = NULL;
 }
 
 static void module_entries_clear(
@@ -7231,7 +7194,7 @@ static void unwind_execution(
             ];
 
         close_frame_upvalues(
-            vm, frame
+            frame
         );
 
         vm->frame_count--;
@@ -7239,7 +7202,6 @@ static void unwind_execution(
 
     vm->stack_count = 0;
     vm->native_root_count = 0;
-    vm->open_upvalues = NULL;
     vm->has_result = false;
     vm->last_result =
         lune_value_null();
@@ -7296,7 +7258,6 @@ static bool prepare_run(
     vm->native_root_count = 0;
     vm->frame_count = 0;
     vm->globals = NULL;
-    vm->open_upvalues = NULL;
     vm->has_result = false;
     vm->last_result =
         lune_value_null();
@@ -8416,6 +8377,7 @@ static bool run_until(
                             ->upvalues[i] =
                             capture_upvalue(
                                 vm,
+                                frame,
                                 &frame
                                     ->locals[
                                         desc.index
@@ -8502,7 +8464,7 @@ static bool run_until(
                 }
 
                 close_frame_upvalues(
-                    vm, frame
+                    frame
                 );
 
                 size_t stack_base =
