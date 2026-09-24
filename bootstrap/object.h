@@ -62,6 +62,9 @@ typedef struct {
     size_t count;
     size_t capacity;
     LuneMapValue *entries;
+    /* Optional hash index into insertion-ordered entries; zero means empty. */
+    size_t *index;
+    size_t index_capacity;
 } LuneObjMap;
 
 typedef struct {
@@ -165,6 +168,13 @@ bool lune_map_get_chars(
     size_t length,
     LuneValue *value
 );
+/* Update an existing key without inserting a missing binding. */
+bool lune_map_update_chars(
+    LuneObjMap *map,
+    const char *chars,
+    size_t length,
+    LuneValue value
+);
 bool lune_map_set(
     LuneHeap *heap,
     LuneObjMap *map,
@@ -195,21 +205,45 @@ LuneObjNative *lune_native_new(
     LuneNativeFn function
 );
 
-bool lune_obj_is_string(
+static inline bool lune_obj_is_string(
     const LuneObj *object
-);
-bool lune_obj_is_list(
+) {
+    return object != NULL &&
+        object->kind ==
+            LUNE_OBJ_STRING;
+}
+
+static inline bool lune_obj_is_list(
     const LuneObj *object
-);
-bool lune_obj_is_map(
+) {
+    return object != NULL &&
+        object->kind ==
+            LUNE_OBJ_LIST;
+}
+
+static inline bool lune_obj_is_map(
     const LuneObj *object
-);
-bool lune_obj_is_closure(
+) {
+    return object != NULL &&
+        object->kind ==
+            LUNE_OBJ_MAP;
+}
+
+static inline bool lune_obj_is_closure(
     const LuneObj *object
-);
-bool lune_obj_is_native(
+) {
+    return object != NULL &&
+        object->kind ==
+            LUNE_OBJ_CLOSURE;
+}
+
+static inline bool lune_obj_is_native(
     const LuneObj *object
-);
+) {
+    return object != NULL &&
+        object->kind ==
+            LUNE_OBJ_NATIVE;
+}
 
 void lune_object_print(
     FILE *out,

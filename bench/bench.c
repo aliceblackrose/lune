@@ -264,7 +264,8 @@ static bool benchmark_compile(void) {
 static bool benchmark_vm(
     const char *name,
     const char *source,
-    int iterations
+    int iterations,
+    int64_t expected
 ) {
     Diagnostics diagnostics = {0};
     LuneAst *ast = NULL;
@@ -303,7 +304,7 @@ static bool benchmark_vm(
         vm,
         &chunk,
         &result
-    )) {
+    ) || result.kind != LUNE_VALUE_INT || result.as.integer != expected) {
         lune_vm_free(vm);
         lune_chunk_free(&chunk);
         lune_ast_free(ast);
@@ -321,7 +322,7 @@ static bool benchmark_vm(
             vm,
             &chunk,
             &result
-        )) {
+        ) || result.kind != LUNE_VALUE_INT || result.as.integer != expected) {
             lune_vm_free(vm);
             lune_chunk_free(&chunk);
             lune_ast_free(ast);
@@ -363,7 +364,8 @@ int main(void) {
         "  i = i + 1\n"
         "}\n"
         "x\n",
-        5
+        5,
+        500000
     ) && ok;
 
     ok = benchmark_vm(
@@ -376,7 +378,8 @@ int main(void) {
         "  i = i + 1\n"
         "}\n"
         "x\n",
-        5
+        5,
+        50000
     ) && ok;
 
     ok = benchmark_vm(
@@ -389,7 +392,8 @@ int main(void) {
         "  i = i + 1\n"
         "}\n"
         "sum\n",
-        5
+        5,
+        900000
     ) && ok;
 
     ok = benchmark_vm(
@@ -402,7 +406,8 @@ int main(void) {
         "  i = i + 1\n"
         "}\n"
         "sum\n",
-        5
+        5,
+        1400000
     ) && ok;
 
     ok = benchmark_vm(
@@ -414,7 +419,8 @@ int main(void) {
         "  i = i + 1\n"
         "}\n"
         "i\n",
-        3
+        3,
+        2000
     ) && ok;
 
     ok = benchmark_vm(
@@ -430,7 +436,58 @@ int main(void) {
         "  i = i + 1\n"
         "}\n"
         "i\n",
-        3
+        3,
+        20000
+    ) && ok;
+
+    ok = benchmark_vm(
+        "large map lookup",
+        "m := {}\n"
+        "i := 0\n"
+        "while i < 1024 {\n"
+        "  m[str(i)] = i\n"
+        "  i = i + 1\n"
+        "}\n"
+        "i = 0\n"
+        "sum := 0\n"
+        "while i < 200000 {\n"
+        "  sum = sum + m[\"1023\"]\n"
+        "  i = i + 1\n"
+        "}\n"
+        "sum\n",
+        5,
+        204600000
+    ) && ok;
+
+    ok = benchmark_vm(
+        "local integer loop",
+        "run := fn() => {\n"
+        "  i := 0\n"
+        "  x := 0\n"
+        "  while i < 500000 {\n"
+        "    x = x + 1\n"
+        "    i = i + 1\n"
+        "  }\n"
+        "  x\n"
+        "}\n"
+        "run()\n",
+        5,
+        500000
+    ) && ok;
+
+    ok = benchmark_vm(
+        "calls with outer capture",
+        "run := fn() => {\n"
+        "  seed := 7\n"
+        "  get := fn() => seed\n"
+        "  inc := fn(x) => x + 1\n"
+        "  i := 0\n"
+        "  while i < 50000 { i = inc(i) }\n"
+        "  i + get()\n"
+        "}\n"
+        "run()\n",
+        5,
+        50007
     ) && ok;
 
     if (!ok) {
