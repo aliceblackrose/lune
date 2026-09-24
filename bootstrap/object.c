@@ -54,7 +54,8 @@ static size_t object_bytes(
                 (const LuneObjMap *)object;
             return sizeof(*map) +
                 map->capacity *
-                    sizeof(*map->entries);
+                    sizeof(*map->entries) +
+                map->index_capacity * sizeof(*map->index);
         }
 
         case LUNE_OBJ_CLOSURE: {
@@ -95,6 +96,7 @@ static void free_object(
             break;
 
         case LUNE_OBJ_MAP:
+            free(((LuneObjMap *)object)->index);
             free(
                 ((LuneObjMap *)object)->entries
             );
@@ -676,29 +678,59 @@ static bool string_equal_chars(
         ) == 0;
 }
 
+/* Small maps retain the compact linear path. Larger maps keep a separate
+ * open-addressed index so iteration and serialization preserve insertion order. */
+static size_t map_hash(const char *chars, size_t length) {
+    size_t hash = 2166136261u;
+    for (size_t i = 0; i < length; i++) {
+        hash = (hash ^ (unsigned char)chars[i]) * 16777619u;
+    }
+    return hash;
+}
+
+static size_t map_find(
+    const LuneObjMap *map,
+    const char *chars,
+    size_t length
+) {
+    if (map->index_capacity != 0) {
+        size_t mask = map->index_capacity - 1;
+        size_t slot = map_hash(chars, length) & mask;
+        while (map->index[slot] != 0) {
+            size_t entry = map->index[slot] - 1;
+            if (string_equal_chars(map->entries[entry].key, chars, length)) {
+                return entry;
+            }
+            slot = (slot + 1) & mask;
+        }
+    } else {
+        for (size_t i = 0; i < map->count; i++) {
+            if (string_equal_chars(map->entries[i].key, chars, length)) {
+                return i;
+            }
+        }
+    }
+    return map->count;
+}
+
+static void map_index_insert(LuneObjMap *map, size_t entry) {
+    const LuneObjString *key = map->entries[entry].key;
+    size_t mask = map->index_capacity - 1;
+    size_t slot = map_hash(key->chars, key->length) & mask;
+    while (map->index[slot] != 0) slot = (slot + 1) & mask;
+    map->index[slot] = entry + 1;
+}
+
 bool lune_map_get_chars(
     const LuneObjMap *map,
     const char *chars,
     size_t length,
     LuneValue *value
 ) {
-    for (
-        size_t i = 0;
-        i < map->count;
-        i++
-    ) {
-        if (string_equal_chars(
-            map->entries[i].key,
-            chars,
-            length
-        )) {
-            *value =
-                map->entries[i].value;
-            return true;
-        }
-    }
-
-    return false;
+    size_t entry = map_find(map, chars, length);
+    if (entry == map->count) return false;
+    *value = map->entries[entry].value;
+    return true;
 }
 
 bool lune_map_get(
@@ -765,12 +797,42 @@ static bool map_append(
         );
     }
 
+    if (map->count >= 8 &&
+        map->count + 1 > map->index_capacity / 2) {
+        if (map->capacity > SIZE_MAX / 2 / sizeof(*map->index)) {
+            return false;
+        }
+        size_t capacity = map->capacity * 2;
+        size_t *index = calloc(capacity, sizeof(*index));
+        if (index == NULL) return false;
+        account_remove(heap, map->index_capacity * sizeof(*index));
+        free(map->index);
+        map->index = index;
+        map->index_capacity = capacity;
+        account_add(heap, capacity * sizeof(*index));
+        for (size_t i = 0; i < map->count; i++) map_index_insert(map, i);
+    }
+
     map->entries[map->count++] =
         (LuneMapValue){
             .key = key,
             .value = value,
         };
 
+    if (map->index_capacity != 0) map_index_insert(map, map->count - 1);
+
+    return true;
+}
+
+bool lune_map_update_chars(
+    LuneObjMap *map,
+    const char *chars,
+    size_t length,
+    LuneValue value
+) {
+    size_t entry = map_find(map, chars, length);
+    if (entry == map->count) return false;
+    map->entries[entry].value = value;
     return true;
 }
 
@@ -780,20 +842,10 @@ bool lune_map_set(
     LuneObjString *key,
     LuneValue value
 ) {
-    for (
-        size_t i = 0;
-        i < map->count;
-        i++
-    ) {
-        if (string_equal_chars(
-            map->entries[i].key,
-            key->chars,
-            key->length
-        )) {
-            map->entries[i].value =
-                value;
-            return true;
-        }
+    size_t entry = map_find(map, key->chars, key->length);
+    if (entry != map->count) {
+        map->entries[entry].value = value;
+        return true;
     }
 
     return map_append(
@@ -808,20 +860,10 @@ bool lune_map_set_chars(
     size_t length,
     LuneValue value
 ) {
-    for (
-        size_t i = 0;
-        i < map->count;
-        i++
-    ) {
-        if (string_equal_chars(
-            map->entries[i].key,
-            chars,
-            length
-        )) {
-            map->entries[i].value =
-                value;
-            return true;
-        }
+    size_t entry = map_find(map, chars, length);
+    if (entry != map->count) {
+        map->entries[entry].value = value;
+        return true;
     }
 
     LuneObjString *key =
@@ -933,46 +975,6 @@ LuneObjNative *lune_native_new(
     native->arity = arity;
     native->function = function;
     return native;
-}
-
-bool lune_obj_is_string(
-    const LuneObj *object
-) {
-    return object != NULL &&
-        object->kind ==
-            LUNE_OBJ_STRING;
-}
-
-bool lune_obj_is_list(
-    const LuneObj *object
-) {
-    return object != NULL &&
-        object->kind ==
-            LUNE_OBJ_LIST;
-}
-
-bool lune_obj_is_map(
-    const LuneObj *object
-) {
-    return object != NULL &&
-        object->kind ==
-            LUNE_OBJ_MAP;
-}
-
-bool lune_obj_is_closure(
-    const LuneObj *object
-) {
-    return object != NULL &&
-        object->kind ==
-            LUNE_OBJ_CLOSURE;
-}
-
-bool lune_obj_is_native(
-    const LuneObj *object
-) {
-    return object != NULL &&
-        object->kind ==
-            LUNE_OBJ_NATIVE;
 }
 
 static void print_object(

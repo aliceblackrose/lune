@@ -483,6 +483,49 @@ int main(void) {
         "m.missing\n"
     );
 
+    expect_int(
+        "indexed-map-grow-update-gc",
+        "m := {}\n"
+        "i := 0\n"
+        "while i < 300 {\n"
+        "  m[str(i)] = [i]\n"
+        "  i = i + 1\n"
+        "}\n"
+        "i = 0\n"
+        "while i < 300 {\n"
+        "  m[str(i)] = [m[str(i)][0] + 1]\n"
+        "  i = i + 1\n"
+        "}\n"
+        "sum := 0\n"
+        "i = 0\n"
+        "while i < 300 {\n"
+        "  sum = sum + m[str(i)][0]\n"
+        "  i = i + 1\n"
+        "}\n"
+        "sum + len(m)\n",
+        45450
+    );
+
+    expect_bool(
+        "indexed-map-missing-and-binary-keys",
+        "m := {a: 1,b: 2,c: 3,d: 4,e: 5,f: 6,g: 7,h: 8,i: 9}\n"
+        "m[\"\"] = 10\n"
+        "m[\"a\\0b\"] = 11\n"
+        "m[\"a\\0c\"] = 12\n"
+        "m.missing == null and m[\"\"] == 10 and "
+        "m[\"a\\0b\"] == 11 and m[\"a\\0c\"] == 12 and m.a == 1\n",
+        true
+    );
+
+    expect_string(
+        "indexed-map-preserves-order",
+        "m := {a: 1,b: 2,c: 3,d: 4,e: 5,f: 6,g: 7,h: 8,i: 9}\n"
+        "m.c = 30\n"
+        "json_stringify(m)\n",
+        "{\"a\":1,\"b\":2,\"c\":30,\"d\":4,\"e\":5,\"f\":6,\"g\":7,\"h\":8,\"i\":9}",
+        56
+    );
+
     expect_bool(
         "string-equality",
         "\"lu\" + \"ne\" == \"lune\"\n",

@@ -25,3 +25,7 @@ The in-process harness uses the C standard library `clock()` so it remains depen
 For meaningful comparisons, use the same machine, compiler, optimization flags, and revision/build configuration. Run the suite several times and compare medians rather than a single sample.
 
 Do not optimize a subsystem solely because a microbenchmark exists. The benchmark should identify a measurable bottleneck in representative scripts before the VM grows more complex.
+
+The measured runtime optimization pass, tradeoffs, and validation limits are
+recorded in [optimization.md](optimization.md). VM workloads validate their result
+on every run and include large-map lookup and a local-variable integer loop.

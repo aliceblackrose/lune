@@ -5,32 +5,6 @@
 #include <inttypes.h>
 #include <string.h>
 
-LuneValue lune_value_null(void) {
-    return (LuneValue){.kind = LUNE_VALUE_NULL};
-}
-
-LuneValue lune_value_bool(bool value) {
-    return (LuneValue){.kind = LUNE_VALUE_BOOL, .as.boolean = value};
-}
-
-LuneValue lune_value_int(int64_t value) {
-    return (LuneValue){.kind = LUNE_VALUE_INT, .as.integer = value};
-}
-
-LuneValue lune_value_float(double value) {
-    return (LuneValue){.kind = LUNE_VALUE_FLOAT, .as.floating = value};
-}
-
-LuneValue lune_value_obj(LuneObj *object) {
-    return (LuneValue){.kind = LUNE_VALUE_OBJ, .as.object = object};
-}
-
-bool lune_value_truthy(LuneValue value) {
-    if (value.kind == LUNE_VALUE_NULL) return false;
-    if (value.kind == LUNE_VALUE_BOOL) return value.as.boolean;
-    return true;
-}
-
 bool lune_value_equal(LuneValue a, LuneValue b) {
     if (a.kind == LUNE_VALUE_INT && b.kind == LUNE_VALUE_FLOAT)
         return (double)a.as.integer == b.as.floating;

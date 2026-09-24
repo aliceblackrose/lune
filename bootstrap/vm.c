@@ -8039,11 +8039,11 @@ static bool run_until(
                     return false;
                 }
 
-                if (!lune_map_get_chars(
+                if (!lune_map_update_chars(
                     vm->globals,
                     name->chars,
                     name->length,
-                    &b
+                    a
                 )) {
                     return unknown_global_error(
                         vm,
@@ -8053,19 +8053,6 @@ static bool run_until(
                     );
                 }
 
-                if (!lune_map_set_chars(
-                    &vm->heap,
-                    vm->globals,
-                    name->chars,
-                    name->length,
-                    a
-                )) {
-                    return runtime_error(
-                        vm,
-                        span,
-                        "out of memory"
-                    );
-                }
                 break;
             }
 
