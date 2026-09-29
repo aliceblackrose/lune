@@ -1,6 +1,7 @@
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 LIBDIR ?= $(PREFIX)/lib/lune
+PYTHON ?= python3
 
 .PHONY: all bootstrap selfhost-images test test-web bench bench-build install uninstall clean
 
@@ -19,7 +20,7 @@ test:
 
 test-web: all
 	./bootstrap/build/lune tests/web/web_helpers.lune
-	python3 tests/web/test_dev_server.py ./bootstrap/build/lune
+	$(PYTHON) tests/web/test_dev_server.py ./bootstrap/build/lune
 
 bench-build:
 	$(MAKE) -C bootstrap bench-build
