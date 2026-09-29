@@ -30,8 +30,7 @@ percent_encode := fn(text) => {
 
     while i < len(text) {
         byte := byte_at(text, i)
-        unreserved :=
-            (byte >= 65 and byte <= 90) or
+        unreserved := (byte >= 65 and byte <= 90) or
             (byte >= 97 and byte <= 122) or
             (byte >= 48 and byte <= 57) or
             byte == 45 or byte == 46 or
@@ -148,12 +147,11 @@ not_found := fn() => response(
     "not found\n"
 )
 
-html_document := fn(title, body) =>
-    "<!doctype html>\n" +
+html_document := fn(title, body) => ("<!doctype html>\n" +
     "<html><head><meta charset=\"utf-8\">" +
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
     "<title>" + escape_html(title) + "</title></head>" +
-    "<body>" + body + "</body></html>\n"
+    "<body>" + body + "</body></html>\n")
 
 dispatch := fn(routes, request) => {
     handler := routes[request.method + " " + request.path]
