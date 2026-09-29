@@ -63,5 +63,5 @@ jobs:
 
       - name: Build and test
         shell: msys2 {0}
-        run: make test
+        run: make test PYTHON=python
 
