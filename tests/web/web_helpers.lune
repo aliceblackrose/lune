@@ -1,0 +1,43 @@
+web := import("../../lib/web")
+
+expect := fn(label, actual, expected) => {
+    if actual != expected {
+        eprint("FAIL", label, "expected", expected, "got", actual)
+        exit(1)
+    }
+    null
+}
+
+expect(
+    "escape-html",
+    web.escape_html("<a href=\"/?x=1&y=2\">'ok'</a>"),
+    "&lt;a href=&quot;/?x=1&amp;y=2&quot;&gt;&#39;ok&#39;&lt;/a&gt;"
+)
+
+expect("percent-encode", web.percent_encode("hello world/✓"), "hello%20world%2F%E2%9C%93")
+expect("percent-decode", web.percent_decode("hello+world%2F%E2%9c%93"), "hello world/✓")
+
+query := web.parse_query("name=Alice+Blackrose&lang=Lune%21&empty=")
+expect("query-name", query.name, "Alice Blackrose")
+expect("query-lang", query.lang, "Lune!")
+expect("query-empty", query.empty, "")
+
+json_response := web.json({ok: true})
+expect("json-status", json_response.status, 200)
+expect("json-content-type", json_response.headers["content-type"], "application/json; charset=utf-8")
+expect("json-body", json_response.body, "{\"ok\":true}")
+
+routes := {
+    "GET /": fn(request) => web.text("home:" + request.path),
+    "*": fn(request) => web.response(418, {}, request.method),
+}
+
+home := web.dispatch(routes, {method: "GET", path: "/"})
+expect("dispatch-exact-status", home.status, 200)
+expect("dispatch-exact-body", home.body, "home:/")
+
+fallback := web.dispatch(routes, {method: "POST", path: "/missing"})
+expect("dispatch-fallback-status", fallback.status, 418)
+expect("dispatch-fallback-body", fallback.body, "POST")
+
+print("web helper tests passed")
