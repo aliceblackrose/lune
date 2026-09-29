@@ -1,0 +1,198 @@
+replace := fn(text, needle, replacement) => join(split(text, needle), replacement)
+
+escape_html := fn(value) => {
+    text := str(value)
+    text = replace(text, "&", "&amp;")
+    text = replace(text, "<", "&lt;")
+    text = replace(text, ">", "&gt;")
+    text = replace(text, "\"", "&quot;")
+    text = replace(text, "'", "&#39;")
+    text
+}
+
+hex_digits := "0123456789ABCDEF"
+hex_decode_digits := "0123456789ABCDEFabcdef"
+
+hex_value := fn(character) => {
+    position := find(hex_decode_digits, character)
+    if position == null {
+        null
+    } else if position < 16 {
+        position
+    } else {
+        position - 6
+    }
+}
+
+percent_encode := fn(text) => {
+    pieces := []
+    i := 0
+
+    while i < len(text) {
+        byte := byte_at(text, i)
+        unreserved :=
+            (byte >= 65 and byte <= 90) or
+            (byte >= 97 and byte <= 122) or
+            (byte >= 48 and byte <= 57) or
+            byte == 45 or byte == 46 or
+            byte == 95 or byte == 126
+
+        if unreserved {
+            push(pieces, bytes([byte]))
+        } else {
+            high := int(byte / 16)
+            low := byte % 16
+            push(
+                pieces,
+                "%" + slice(hex_digits, high, high + 1) +
+                    slice(hex_digits, low, low + 1)
+            )
+        }
+
+        i = i + 1
+    }
+
+    join(pieces, "")
+}
+
+percent_decode := fn(text) => {
+    output := []
+    i := 0
+
+    while i < len(text) {
+        byte := byte_at(text, i)
+
+        if byte == 43 {
+            push(output, 32)
+            i = i + 1
+        } else if byte == 37 and i + 2 < len(text) {
+            high := hex_value(slice(text, i + 1, i + 2))
+            low := hex_value(slice(text, i + 2, i + 3))
+
+            if high != null and low != null {
+                push(output, high * 16 + low)
+                i = i + 3
+            } else {
+                push(output, byte)
+                i = i + 1
+            }
+        } else {
+            push(output, byte)
+            i = i + 1
+        }
+    }
+
+    bytes(output)
+}
+
+parse_query := fn(query) => {
+    values := {}
+
+    if query != "" {
+        each(split(query, "&"), fn(part) => {
+            equal := find(part, "=")
+            key := if equal == null {
+                part
+            } else {
+                slice(part, 0, equal)
+            }
+            value := if equal == null {
+                ""
+            } else {
+                slice(part, equal + 1, len(part))
+            }
+
+            values[percent_decode(key)] = percent_decode(value)
+        })
+    }
+
+    values
+}
+
+response := fn(status, headers, body) => {
+    status: status,
+    headers: headers,
+    body: body,
+}
+
+text := fn(body) => response(
+    200,
+    {"content-type": "text/plain; charset=utf-8"},
+    body
+)
+
+html := fn(body) => response(
+    200,
+    {"content-type": "text/html; charset=utf-8"},
+    body
+)
+
+json := fn(value) => response(
+    200,
+    {"content-type": "application/json; charset=utf-8"},
+    json_stringify(value)
+)
+
+redirect := fn(location) => response(
+    302,
+    {location: location},
+    ""
+)
+
+not_found := fn() => response(
+    404,
+    {"content-type": "text/plain; charset=utf-8"},
+    "not found\n"
+)
+
+html_document := fn(title, body) =>
+    "<!doctype html>\n" +
+    "<html><head><meta charset=\"utf-8\">" +
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+    "<title>" + escape_html(title) + "</title></head>" +
+    "<body>" + body + "</body></html>\n"
+
+dispatch := fn(routes, request) => {
+    handler := routes[request.method + " " + request.path]
+
+    if handler == null {
+        handler = routes[request.path]
+    }
+
+    if handler == null {
+        handler = routes["*"]
+    }
+
+    if handler == null {
+        not_found()
+    } else {
+        handler(request)
+    }
+}
+
+request := fn() => {
+    if len(args) != 1 {
+        eprint("web.request() expects one JSON request argument from tools/lune_web.py")
+        exit(2)
+    }
+
+    value := json_parse(args[0])
+    value.query_params = parse_query(value.query or "")
+    value
+}
+
+{
+    escape_html: escape_html,
+    percent_encode: percent_encode,
+    percent_decode: percent_decode,
+    parse_query: parse_query,
+    response: response,
+    text: text,
+    html: html,
+    json: json,
+    redirect: redirect,
+    not_found: not_found,
+    html_document: html_document,
+    dispatch: dispatch,
+    request: request,
+}
