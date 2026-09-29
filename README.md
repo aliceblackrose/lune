@@ -98,6 +98,19 @@ Declarative VS Code support lives under `editors/vscode/` and includes `.lune` f
 
 A dependency-free Python LSP adapter lives under `editors/lsp/`. It delegates diagnostics to `lune check` and formatting to `lune fmt`, so editor behavior uses the production compiler rather than a duplicate parser.
 
+## Web development
+
+This branch includes a small development HTTP workflow without expanding the VM's native surface. `lib/web.lune` provides HTML escaping, URL/query helpers, response constructors, and routing; `tools/lune_web.py` provides a dependency-free local HTTP bridge that starts a fresh Lune process for each request.
+
+```sh
+make
+python3 tools/lune_web.py examples/web/app.lune --lune bootstrap/build/lune
+```
+
+Then open `http://127.0.0.1:8080/` or call `/api/hello`. The bridge is intended for local development and prototyping rather than production serving. See [docs/web.md](docs/web.md) for the request/response contract, limits, and examples.
+
+`make test-web` runs the Lune web-helper tests and the Python-to-Lune application bridge tests. The top-level `make test` includes this target.
+
 ## Performance
 
 Run the benchmark suite with:
