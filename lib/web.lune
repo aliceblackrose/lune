@@ -110,9 +110,12 @@ parse_query := fn(query) => {
 }
 
 response := fn(status, headers, body) => {
-    status: status,
-    headers: headers,
-    body: body,
+    value := {
+        status: status,
+        headers: headers,
+        body: body,
+    }
+    value
 }
 
 text := fn(body) => response(
